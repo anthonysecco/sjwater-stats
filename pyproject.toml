@@ -1,4 +1,4 @@
-﻿[project]
+[project]
 name = "sjwater-stats"
 version = "0.1.0"
 description = "Home Assistant integration for San Jose Water smart-meter usage, leak and high-use alerts"
