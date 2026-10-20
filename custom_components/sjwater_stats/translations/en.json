@@ -1,0 +1,88 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "San Jose Water",
+        "description": "Sign in with your SJWaterHUB login (sjwaterhub.com). Needs a smart meter: the integration reads its hourly readings for the Energy dashboard and for leak and high-use alerts. Unofficial; not affiliated with San Jose Water.",
+        "data": {
+          "username": "SJWaterHUB username",
+          "password": "Password"
+        }
+      },
+      "account": {
+        "title": "Choose an account",
+        "description": "This login has more than one San Jose Water account. Pick one; add the integration again for the others.",
+        "data": {
+          "account": "Account number"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sign in again",
+        "description": "SJWaterHUB no longer accepts the saved password for {username}. Enter the current one.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Username or password not accepted by SJWaterHUB.",
+      "verification_required": "SJWaterHUB wants an extra step first (verification code, email confirmation or password change). Sign in once at sjwaterhub.com in a browser, then try again.",
+      "account_locked": "SJWaterHUB has temporarily blocked sign-in for this login (too many attempts or a disabled profile). Wait 15 minutes or check at sjwaterhub.com.",
+      "no_usage_data": "No hourly smart-meter readings were found for this account. They appear once San Jose Water has installed a smart meter at the address.",
+      "cannot_connect": "Could not reach SJWaterHUB, or it answered unexpectedly. Try again later."
+    },
+    "abort": {
+      "already_configured": "This account is already set up.",
+      "reauth_successful": "Signed in again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "San Jose Water options",
+        "description": "How often to check SJWaterHUB and when to flag leaks or unusual use.",
+        "data": {
+          "scan_interval": "Update interval",
+          "high_day_percent": "High daily use threshold",
+          "high_hour_gallons": "High hourly use threshold",
+          "continuous_hours": "Continuous use threshold",
+          "overnight_start": "Overnight check starts",
+          "overnight_end": "Overnight check ends",
+          "stale_hours": "Data delayed after"
+        },
+        "data_description": {
+          "scan_interval": "Hours between checks (1-6). SJWaterHUB adds new readings every few hours.",
+          "high_day_percent": "High daily usage turns on when yesterday's use reaches this share of your 30-day daily average.",
+          "high_hour_gallons": "High hourly usage turns on when any hour in the last 24 used at least this much (a hose or sprinkler left running is often 300-600 gal/h).",
+          "continuous_hours": "Possible leak turns on when water was used in this many consecutive hours. Homes normally have idle hours every day.",
+          "overnight_start": "Start hour (0-23) of the nightly window when your home normally uses no water.",
+          "overnight_end": "End hour (0-23, exclusive). Possible leak turns on if every hour in the window used water. Move the window if irrigation runs at night.",
+          "stale_hours": "Data delayed turns on when SJWaterHUB has not published new readings for this long."
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "possible_leak": { "name": "Possible leak" },
+      "high_daily_usage": { "name": "High daily usage" },
+      "high_hourly_usage": { "name": "High hourly usage" },
+      "data_delayed": { "name": "Data delayed" }
+    },
+    "sensor": {
+      "usage_today": { "name": "Usage today" },
+      "usage_yesterday": { "name": "Usage yesterday" },
+      "usage_last_7_days": { "name": "Usage last 7 days" },
+      "usage_last_30_days": { "name": "Usage last 30 days" },
+      "average_daily_usage": { "name": "Average daily usage" },
+      "yesterday_vs_average": { "name": "Yesterday vs average" },
+      "last_hour_usage": { "name": "Last hour usage" },
+      "flow_rate": { "name": "Flow rate" },
+      "peak_hour_usage": { "name": "Peak hourly usage" },
+      "overnight_minimum": { "name": "Overnight minimum" },
+      "continuous_use": { "name": "Continuous use" },
+      "last_leak_alert": { "name": "Last leak alert" },
+      "data_updated": { "name": "Data updated" }
+    }
+  }
+}
