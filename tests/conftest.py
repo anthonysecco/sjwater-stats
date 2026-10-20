@@ -8,8 +8,11 @@ from .portal import FakePortal
 
 
 @pytest.fixture(autouse=True)
-def auto_enable_custom_integrations(enable_custom_integrations):
-    """Load custom_components/ in every test."""
+def auto_enable_custom_integrations(recorder_mock, enable_custom_integrations):
+    """Load custom_components/ in every test, with a test recorder (the integration depends on it).
+
+    recorder_mock is listed first: its database must exist before the hass fixture starts.
+    """
     return
 
 
