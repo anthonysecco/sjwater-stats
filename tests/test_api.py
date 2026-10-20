@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from itertools import pairwise
 
 import pytest
 
@@ -184,7 +185,7 @@ def test_parse_usage_and_billing_history() -> None:
     assert [(r.read_date, r.days, r.ccf) for r in reads] == READS  # oldest first
     assert reads[-1].start == date(2026, 7, 27)
     assert reads[-1].gallons == round(13 * 748.052, 1)
-    for earlier, later in zip(reads, reads[1:], strict=False):
+    for earlier, later in pairwise(reads):
         assert later.start == earlier.read_date  # periods chain
 
     bills = parse_billing_history(billing_history_page("t", BILLS))
