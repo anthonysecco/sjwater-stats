@@ -176,9 +176,10 @@ class SJWaterConfigFlow(ConfigFlow, domain=DOMAIN):
         entry = self._get_reauth_entry()
         errors: dict[str, str] = {}
         if user_input is not None:
-            self._credentials = {CONF_USERNAME: entry.data[CONF_USERNAME], CONF_PASSWORD: user_input[CONF_PASSWORD]}
+            password = user_input[CONF_PASSWORD]
+            self._credentials = {CONF_USERNAME: entry.data[CONF_USERNAME], CONF_PASSWORD: password}
             if not (error := await self._check_account(entry.data[CONF_ACCOUNT])):
-                return self.async_update_reload_and_abort(entry, data_updates={CONF_PASSWORD: user_input[CONF_PASSWORD]})
+                return self.async_update_reload_and_abort(entry, data_updates={CONF_PASSWORD: password})
             errors["base"] = error
         schema = vol.Schema({vol.Required(CONF_PASSWORD): PASSWORD_SELECTOR})
         return self.async_show_form(

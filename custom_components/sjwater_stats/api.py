@@ -14,6 +14,7 @@ How the portal works (observed; it has no public API):
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 import html as html_lib
@@ -238,10 +239,8 @@ class SJWaterClient:
 
     async def _permissions(self) -> None:
         """What each page does on load; failures here are not fatal."""
-        try:
+        with contextlib.suppress(SJWaterError):
             await self._text("POST", PERMISSIONS_URL, data={"token": self._token, "sitePrefix": self._prefix})
-        except SJWaterError:
-            pass
 
     async def _broker(self, request: dict[str, Any]) -> dict[str, Any]:
         """One RequestBroker call; carries the token forward."""
