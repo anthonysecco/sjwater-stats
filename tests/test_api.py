@@ -2,28 +2,55 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 
 from custom_components.sjwater_stats.api import (
     AccountLocked,
+    Bill,
+    BillingPeriod,
+    HourReading,
     InvalidAuth,
+    MeterRead,
     NoAccounts,
     NoUsageData,
     SessionExpired,
     SJWaterError,
     VerificationRequired,
+    billing_periods,
     login_error,
     parse_accounts,
+    parse_billing_history,
     parse_last_updated,
     parse_page_token,
     parse_usage,
+    parse_usage_history,
+)
+from custom_components.sjwater_stats.billing import (
+    allocate_costs,
+    fixed_charge_per_day,
+    percent_change_per_day,
+    period_bounds,
+    same_period_last_year,
 )
 from custom_components.sjwater_stats.const import SJW_TZ
-from custom_components.sjwater_stats.coordinator import derive, overnight_window
+from custom_components.sjwater_stats.coordinator import derive
 
-from .portal import ACCOUNT, METER_INSTALLED, OTHER_ACCOUNT, hourly_graph, page, typical_hour
+from .portal import (
+    ACCOUNT,
+    BILLS,
+    FIXED_PER_DAY,
+    METER_INSTALLED,
+    OTHER_ACCOUNT,
+    READS,
+    bill_amount,
+    billing_history_page,
+    hourly_graph,
+    page,
+    typical_hour,
+    usage_history_page,
+)
 
 NOW = datetime(2026, 10, 19, 19, 30, tzinfo=SJW_TZ)
 
@@ -107,60 +134,147 @@ def test_login_error_names_the_portal_code() -> None:
 def test_derive_typical_day() -> None:
     usage = parse_usage(hourly_graph(), NOW)
     data = derive(usage, {}, NOW)
-    assert data.last_hour.local_start.hour == 17
-    assert data.today.gallons == 15 + 15  # 06:00 and 07:00 published so far; Monday has no irrigation
-    assert data.today.complete is False
+    assert data.data_through == datetime(2026, 10, 19, 18, tzinfo=SJW_TZ)
     assert data.yesterday.gallons == 81 + 450
     assert data.yesterday.complete is True
     days = [date(2026, 10, 18) - timedelta(days=i) for i in range(30)]
     expected_30 = sum(typical_hour(d, h) for d in days for h in range(24))
     assert data.last_30_days == expected_30
     assert data.daily_average == round(expected_30 / 30, 1)
-    assert data.high_daily_usage is True  # 531 gal vs a ~170 gal average
-    assert data.high_hourly_usage is True  # 450 gal at 20:00 yesterday is within the last 24 h
-    assert data.peak_hour.gallons == 450
-    assert data.overnight_minimum == 0
     assert data.possible_leak is False
-    assert data.longest_run_hours == 4  # 18:00-21:00 yesterday
+    assert data.leak_hours_7_days == 0
     assert data.data_stale is False
-    assert round(data.last_hour.gallons / 60, 2) == 0
+    assert data.billing is None  # no billing periods passed
 
 
-def test_derive_leak_signals() -> None:
-    def dripping(day: date, hour: int) -> float:
-        return typical_hour(day, hour) + (7 if day >= date(2026, 10, 18) else 0)
-
-    data = derive(parse_usage(hourly_graph(value=dripping), NOW), {}, NOW)
-    assert data.overnight_minimum == 7
-    assert "overnight_flow" in data.leak_reasons
-    assert "continuous_use" in data.leak_reasons
-    assert data.longest_run_hours == 24
-    assert data.possible_leak is True
-
+def test_derive_portal_leak_flag() -> None:
     flagged = hourly_graph(
         leak_hours={(date(2026, 10, 19), 3)},
         value=lambda d, h: typical_hour(d, h) + (30 if h == 3 else 0),
     )
     data = derive(parse_usage(flagged, NOW), {}, NOW)
-    assert data.leak_reasons[0] == "portal_leak_flag"
+    assert data.possible_leak is True
+    assert data.leak_hours_7_days == 1
     assert data.last_portal_leak.local_start == datetime(2026, 10, 19, 3, tzinfo=SJW_TZ)
 
+    # Water at night without San Jose Water's flag is not a leak any more.
+    dripping = hourly_graph(value=lambda d, h: typical_hour(d, h) + 7)
+    assert derive(parse_usage(dripping, NOW), {}, NOW).possible_leak is False
 
-def test_derive_options_and_staleness() -> None:
+    # A flag older than the window stays in last_portal_leak but turns the sensor off.
+    old = hourly_graph(leak_hours={(date(2026, 10, 10), 3)}, value=lambda d, h: 30 if h == 3 else 0)
+    data = derive(parse_usage(old, NOW), {}, NOW)
+    assert data.possible_leak is False
+    assert data.last_portal_leak is not None
+
+
+def test_derive_staleness() -> None:
     usage = parse_usage(hourly_graph(), NOW)
-    data = derive(usage, {"high_day_percent": 400, "high_hour_gallons": 500}, NOW)
-    assert data.high_daily_usage is False
-    assert data.high_hourly_usage is False
-    late = NOW + timedelta(hours=30)
-    assert derive(usage, {}, late).data_stale is True
+    assert derive(usage, {}, NOW + timedelta(hours=30)).data_stale is True
+    assert derive(usage, {"stale_hours": 48}, NOW + timedelta(hours=30)).data_stale is False
 
 
-def test_overnight_window() -> None:
-    end = datetime(2026, 10, 19, 18, tzinfo=SJW_TZ)
-    assert overnight_window(end, 1, 4) == (
-        datetime(2026, 10, 19, 1, tzinfo=SJW_TZ),
-        datetime(2026, 10, 19, 4, tzinfo=SJW_TZ),
-    )
-    assert overnight_window(datetime(2026, 10, 19, 2, tzinfo=SJW_TZ), 1, 4)[0].date() == date(2026, 10, 18)
-    assert overnight_window(end, 23, 4)[0] == datetime(2026, 10, 18, 23, tzinfo=SJW_TZ)
-    assert overnight_window(end.astimezone(UTC), 3, 3) is None
+def _periods() -> list[BillingPeriod]:
+    reads = parse_usage_history(usage_history_page("t", READS))
+    return billing_periods(reads, parse_billing_history(billing_history_page("t", BILLS)))
+
+
+def test_parse_usage_and_billing_history() -> None:
+    reads = parse_usage_history(usage_history_page("t", READS))
+    assert [(r.read_date, r.days, r.ccf) for r in reads] == READS  # oldest first
+    assert reads[-1].start == date(2026, 7, 27)
+    assert reads[-1].gallons == round(13 * 748.052, 1)
+    for earlier, later in zip(reads, reads[1:], strict=False):
+        assert later.start == earlier.read_date  # periods chain
+
+    bills = parse_billing_history(billing_history_page("t", BILLS))
+    assert [(b.bill_date, b.amount) for b in bills] == BILLS
+    big = parse_billing_history(billing_history_page("t", [(date(2026, 9, 28), 1234.5)]))
+    assert big[0].amount == 1234.5  # "$1,234.50"
+
+    with pytest.raises(SJWaterError):
+        parse_usage_history(page("t"))
+
+
+def test_billing_periods_pairing() -> None:
+    reads = parse_usage_history(usage_history_page("t", READS))
+    # Latest read not billed yet; a stray bill far from any read is ignored.
+    bills = [Bill(d, a) for d, a in BILLS[:-1]] + [Bill(date(2026, 9, 20), 99.0)]
+    periods = billing_periods(reads, bills)
+    assert len(periods) == len(READS)
+    assert periods[-1].bill is None
+    assert periods[-2].bill == Bill(date(2026, 7, 31), bill_amount(60, 14.0))
+    assert all(p.bill and p.bill.bill_date > p.end for p in periods[:-1])
+
+
+def test_year_over_year() -> None:
+    periods = _periods()
+    last = periods[-1]
+    before = same_period_last_year(periods, last)
+    assert before is not None
+    assert before.end == date(2025, 9, 23)
+    assert percent_change_per_day(last, before) == round(((13 / 59) / (10 / 60) - 1) * 100, 1)  # 32.2
+    assert same_period_last_year(periods, periods[0]) is None
+
+
+def test_fixed_charge_estimate() -> None:
+    assert fixed_charge_per_day(_periods()) == pytest.approx(FIXED_PER_DAY, abs=0.02)
+    assert fixed_charge_per_day(_periods()[:2]) == 0  # too few bills to fit
+
+
+def _flat_hours(start: date, end: date, gallons: float) -> list[HourReading]:
+    first, last = period_bounds(start, end)
+    hours, t = [], first
+    while t < last:
+        hours.append(HourReading(start=t, gallons=gallons, possible_leak=False, unavailable=False))
+        t += timedelta(hours=1)
+    return hours
+
+
+def test_allocate_costs_complete_period_matches_bill() -> None:
+    periods = _periods()
+    period = periods[-2]  # 2026-05-28 to 2026-07-27, fully metered here
+    hours = _flat_hours(period.start, period.end, 10.0)
+    hours[5] = HourReading(start=hours[5].start, gallons=500.0, possible_leak=False, unavailable=False)
+    costs = allocate_costs(hours, periods)
+    assert len(costs) == len(hours)
+    assert sum(c for _, c in costs) == pytest.approx(period.bill.amount, abs=0.01)
+    assert costs[5][1] > costs[4][1]  # the big hour carries more of the usage charge
+    assert costs[0][0] == period_bounds(period.start, period.end)[0]
+
+
+def test_allocate_costs_partial_and_dst() -> None:
+    periods = _periods()
+    period = periods[-2]
+    hours = _flat_hours(period.start, period.end, 10.0)
+    half = hours[len(hours) // 2 :]
+    partial = sum(c for _, c in allocate_costs(half, periods))
+    fixed = fixed_charge_per_day(periods) * period.read.days
+    expected = fixed * len(half) / len(hours) + (period.bill.amount - fixed) * (10.0 * len(half)) / period.read.gallons
+    assert partial == pytest.approx(expected, abs=0.01)
+
+    # A period across the November clock change: the portal has one hour fewer; still the whole bill.
+    nov = [MeterRead(date(2026, 10, 1), 30, 5.0), MeterRead(date(2026, 11, 30), 60, 10.0)]
+    dst_periods = billing_periods(nov, [Bill(date(2026, 12, 3), 150.0)])
+    dst_hours = _flat_hours(date(2026, 10, 1), date(2026, 11, 30), 5.0)
+    dst_hours.pop(800)
+    assert sum(c for _, c in allocate_costs(dst_hours, dst_periods)) == pytest.approx(150.0, abs=0.01)
+
+
+def test_derive_billing() -> None:
+    usage = parse_usage(hourly_graph(), NOW)
+    data = derive(usage, {}, NOW, _periods())
+    billing = data.billing
+    assert billing.last_period.end == date(2026, 9, 24)
+    assert billing.last_year_period.end == date(2025, 9, 23)
+    assert billing.vs_last_year == 32.2
+    assert billing.last_bill.amount == bill_amount(59, 13.0)
+    assert billing.period_start == date(2026, 9, 24)
+    start = datetime(2026, 9, 24, tzinfo=SJW_TZ)
+    expected = 0.0
+    day = start.date()
+    while day <= date(2026, 10, 19):
+        expected += sum(typical_hour(day, h) for h in range(18 if day == date(2026, 10, 19) else 24))
+        day += timedelta(days=1)
+    assert billing.period_to_date == expected
+    assert billing.period_days == round((datetime(2026, 10, 19, 18, tzinfo=SJW_TZ) - start).total_seconds() / 86400, 1)

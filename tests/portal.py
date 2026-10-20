@@ -20,6 +20,30 @@ METER_INSTALLED = date(2026, 8, 5)  # zeros before this, like an account that go
 LAST_DAY = date(2026, 10, 19)
 LAST_UPDATED = "2026-10-19T18:00:00-06:00"  # the portal's odd fixed offset; 18:00 is Pacific clock time
 
+# Bi-monthly meter reads (read date, days in period, CCF), oldest first. Each period starts on the
+# previous read date. Made up, but chained like the real Usage History table.
+READS = [
+    (date(2025, 5, 28), 62, 7.0),
+    (date(2025, 7, 25), 58, 12.0),
+    (date(2025, 9, 23), 60, 10.0),
+    (date(2025, 11, 21), 59, 8.0),
+    (date(2026, 1, 28), 68, 6.0),
+    (date(2026, 3, 30), 61, 7.0),
+    (date(2026, 5, 28), 59, 9.0),
+    (date(2026, 7, 27), 60, 14.0),
+    (date(2026, 9, 24), 59, 13.0),
+]
+FIXED_PER_DAY = 1.30  # made-up tariff: a fixed charge per day plus a rate per CCF
+RATE_PER_CCF = 11.00
+
+
+def bill_amount(days: int, ccf: float) -> float:
+    """What the made-up tariff charges for a period."""
+    return round(FIXED_PER_DAY * days + RATE_PER_CCF * ccf, 2)
+
+
+BILLS = [(read + timedelta(days=4), bill_amount(days, ccf)) for read, days, ccf in READS]
+
 
 def typical_hour(day: date, hour: int) -> float:
     """Made-up household: showers, dishes, irrigation on Tue/Fri, a big hose day on Oct 18."""
@@ -105,6 +129,34 @@ def page(token: str, accounts: list[str] | None = None, usage_account: str | Non
     )
 
 
+def usage_history_page(token: str, reads: list[tuple[date, int, float]]) -> str:
+    """The Usage History page: table#waterusageTbl, newest first, like the portal."""
+    rows = "".join(
+        f'<tr><td tabindex="0" data-th="Read Date">{d:%m/%d/%Y}</td>'
+        f'<td tabindex="0" data-th="No. Of Days" class="col text-end text-tnum">{days}</td>'
+        f'<td tabindex="0" data-th="Usage" class="text-end text-tnum">{ccf:.1f}</td></tr>'
+        for d, days, ccf in reversed(reads)
+    )
+    table = (
+        '<table class="table" id="waterusageTbl"><thead><tr><th>Read Date</th><th>No. Of Days</th>'
+        f"<th>Usage (CCF)</th></tr></thead><tbody>{rows}</tbody></table>"
+        '<table id="gasusageTbl"><tbody><tr><td>No entries found</td></tr></tbody></table>'
+    )
+    return page(token).replace("</body>", table + "</body>")
+
+
+def billing_history_page(token: str, bills: list[tuple[date, float]]) -> str:
+    """The Billing History page: one row per bill, newest first, like the portal."""
+    rows = "".join(
+        f'<tr><td tabindex="0" class="text-nowrap" data-th="Bill Date"><a data-viewbilldate="{d.isoformat()}" '
+        f'data-invoicenumber="" class="viewBillHistory" href="javascript:void(0);">{d:%m/%d/%Y}</a></td>'
+        f'<td tabindex="0" data-th="Amount" class="text-end text-tnum">${amount:,.2f}</td></tr>'
+        for d, amount in reversed(bills)
+    )
+    table = f"<table><thead><tr><th>Bill Date</th><th>Amount</th></tr></thead><tbody>{rows}</tbody></table>"
+    return page(token).replace("</body>", table + "</body>")
+
+
 class FakePortal:
     """Answers the client's requests the way SJWaterHUB does."""
 
@@ -113,11 +165,17 @@ class FakePortal:
         accounts: list[str] | None = None,
         graph: dict[str, Any] | None = None,
         login_result: dict[str, Any] | None = None,
+        reads: list[tuple[date, int, float]] | None = None,
+        bills: list[tuple[date, float]] | None = None,
+        billing_down: bool = False,
     ) -> None:
         self.accounts = accounts or [ACCOUNT]
         self.selected = self.accounts[0]
         self.graph = graph if graph is not None else hourly_graph()
         self.login_result = login_result or {"Success": True, "ValidToken": False, "RedirectUrl": "/AccountSummary"}
+        self.reads = READS if reads is None else reads
+        self.bills = BILLS if bills is None else bills
+        self.billing_down = billing_down
         self.calls: list[str] = []
         self.tokens = 0
         self.permitted: set[str] = set()  # tokens the page-load permissions call has registered
@@ -130,6 +188,8 @@ class FakePortal:
         aioclient_mock.get(BASE_URL + "/", text=page("tok-login"))
         aioclient_mock.post(f"{BASE_URL}/AccountSummary", side_effect=self._summary)
         aioclient_mock.post(f"{BASE_URL}/UnderstandUsage", side_effect=self._usage_page)
+        aioclient_mock.post(f"{BASE_URL}/UsageHistory", side_effect=self._usage_history)
+        aioclient_mock.post(f"{BASE_URL}/BillingHistory", side_effect=self._billing_history)
         aioclient_mock.post(PERMISSIONS_URL, side_effect=self._permissions)
         aioclient_mock.post(BROKER_URL, side_effect=self._broker)
 
@@ -138,6 +198,14 @@ class FakePortal:
 
     async def _usage_page(self, method, url, data):
         return AiohttpClientMockResponse(method, url, text=page(self._token(), self.accounts, self.selected))
+
+    async def _usage_history(self, method, url, data):
+        if self.billing_down:
+            return AiohttpClientMockResponse(method, url, status=500)
+        return AiohttpClientMockResponse(method, url, text=usage_history_page(self._token(), self.reads))
+
+    async def _billing_history(self, method, url, data):
+        return AiohttpClientMockResponse(method, url, text=billing_history_page(self._token(), self.bills))
 
     async def _permissions(self, method, url, data):
         self.calls.append("CreateExceptionPermissions")

@@ -10,6 +10,10 @@ How the portal works (observed; it has no public API):
   two years of hours labelled [date, time] in Pacific wall-clock time (24 labels every day, even
   across daylight-saving changes), in gallons, split into Normal Use / Possible Leak / Data
   Unavailable series. Hours after `LastUpdated` are padded with zeros and are not real readings.
+- Billing is server-rendered HTML, reached like any page: /UsageHistory has table#waterusageTbl
+  (Read Date, No. Of Days, Usage in CCF; one row per bi-monthly meter read) and /BillingHistory
+  has one row per bill (Bill Date with data-viewbilldate, Amount). Bills carry no usage of their
+  own; each is paired with the meter read a few days before it.
 """
 
 from __future__ import annotations
@@ -25,18 +29,25 @@ from urllib.parse import urljoin
 
 import aiohttp
 
-from .const import BASE_URL, LOGGER, REQUEST_TIMEOUT, SJW_TZ
+from .const import BASE_URL, BILL_MATCH_DAYS, GALLONS_PER_CCF, LOGGER, REQUEST_TIMEOUT, SJW_TZ
 
 USER_AGENT = "HomeAssistant-SJWater-Stats (+https://github.com/anthonysecco/sjwater-stats)"
 BROKER_URL = f"{BASE_URL}/api/WebApi/RequestBroker"
 PERMISSIONS_URL = f"{BASE_URL}/api/WebApi/CreateExceptionPermissions"
 USAGE_VIEW = "UnderstandUsage"
+USAGE_HISTORY_VIEW = "UsageHistory"
+BILLING_HISTORY_VIEW = "BillingHistory"
 
 _INPUT_RE = re.compile(r"<input\b[^>]*>", re.IGNORECASE)
 _ATTR_RE = re.compile(r'([\w-]+)\s*=\s*"([^"]*)"')
 _ACCOUNT_RE = re.compile(r'VXengage_GetHourlyGraph"\s*,\s*AccountNumber\s*:\s*"([^"]+)"')
 _SELECT_RE = re.compile(r'<select\b[^>]*id="accountSelector"[^>]*>(.*?)</select>', re.IGNORECASE | re.DOTALL)
 _OPTION_RE = re.compile(r'<option\b[^>]*value="([^"]+)"', re.IGNORECASE)
+_WATER_TABLE_RE = re.compile(r'<table\b[^>]*id="waterusageTbl"[^>]*>(.*?)</table>', re.IGNORECASE | re.DOTALL)
+_ROW_RE = re.compile(r"<tr\b[^>]*>(.*?)</tr>", re.IGNORECASE | re.DOTALL)
+_CELL_RE = re.compile(r'<td\b[^>]*data-th="([^"]+)"[^>]*>(.*?)</td>', re.IGNORECASE | re.DOTALL)
+_TAG_RE = re.compile(r"<[^>]+>")
+_BILL_DATE_RE = re.compile(r'data-viewbilldate="(\d{4}-\d{2}-\d{2})"')
 
 
 class SJWaterError(Exception):
@@ -205,6 +216,138 @@ def parse_usage(graph: dict[str, Any], now: datetime | None = None) -> Usage:
     return Usage(last_updated=last_updated, hours=hours[first:])
 
 
+@dataclass(slots=True, frozen=True)
+class MeterRead:
+    """One billing-period meter read from Usage History."""
+
+    read_date: date
+    days: int
+    ccf: float
+
+    @property
+    def start(self) -> date:
+        """First day of the period (the previous read date); the period runs to `read_date`, exclusive."""
+        return self.read_date - timedelta(days=self.days)
+
+    @property
+    def gallons(self) -> float:
+        """Billed usage in gallons."""
+        return round(self.ccf * GALLONS_PER_CCF, 1)
+
+
+@dataclass(slots=True, frozen=True)
+class Bill:
+    """One bill from Billing History."""
+
+    bill_date: date
+    amount: float
+
+
+@dataclass(slots=True, frozen=True)
+class BillingPeriod:
+    """A meter read and, once issued, its bill."""
+
+    read: MeterRead
+    bill: Bill | None
+
+    @property
+    def start(self) -> date:
+        """First day of the period."""
+        return self.read.start
+
+    @property
+    def end(self) -> date:
+        """Read date: the day after the period's last day."""
+        return self.read.read_date
+
+
+def _cells(row: str) -> dict[str, str]:
+    """Cell text keyed by `data-th`, plus the raw cell HTML under "<key>:html"."""
+    cells: dict[str, str] = {}
+    for key, value in _CELL_RE.findall(row):
+        cells[key.strip()] = html_lib.unescape(_TAG_RE.sub("", value)).strip()
+        cells[f"{key.strip()}:html"] = value
+    return cells
+
+
+def _us_date(value: str) -> date | None:
+    try:
+        return datetime.strptime(value.strip(), "%m/%d/%Y").date()
+    except ValueError:
+        return None
+
+
+def _amount(value: str) -> float | None:
+    """'$1,234.56', '-$12.00' or '($12.00)' as a float."""
+    text = value.strip()
+    negative = text.startswith("-") or (text.startswith("(") and text.endswith(")"))
+    digits = re.sub(r"[^\d.]", "", text)
+    try:
+        number = float(digits)
+    except ValueError:
+        return None
+    return -number if negative else number
+
+
+def parse_usage_history(page: str) -> list[MeterRead]:
+    """Water meter reads from the Usage History page, oldest first."""
+    table = _WATER_TABLE_RE.search(page)
+    if not table:
+        raise SJWaterError("the usage history page has no water usage table")
+    reads: dict[date, MeterRead] = {}
+    for row in _ROW_RE.findall(table.group(1)):
+        cells = _cells(row)
+        read_date = _us_date(cells.get("Read Date", ""))
+        days = cells.get("No. Of Days", "")
+        usage = next((v for k, v in cells.items() if k.startswith("Usage") and not k.endswith(":html")), "")
+        if read_date is None or not days.isdigit() or int(days) <= 0:
+            continue
+        try:
+            ccf = float(usage.replace(",", ""))
+        except ValueError:
+            continue
+        reads[read_date] = MeterRead(read_date=read_date, days=int(days), ccf=ccf)
+    return [reads[d] for d in sorted(reads)]
+
+
+def parse_billing_history(page: str) -> list[Bill]:
+    """Bills from the Billing History page, oldest first."""
+    bills: dict[date, Bill] = {}
+    for row in _ROW_RE.findall(page):
+        cells = _cells(row)
+        if "Bill Date" not in cells or "Amount" not in cells:
+            continue
+        iso = _BILL_DATE_RE.search(cells["Bill Date:html"])
+        bill_date = date.fromisoformat(iso.group(1)) if iso else _us_date(cells["Bill Date"])
+        amount = _amount(cells["Amount"])
+        if bill_date is None or amount is None:
+            continue
+        bills[bill_date] = Bill(bill_date=bill_date, amount=amount)
+    return [bills[d] for d in sorted(bills)]
+
+
+def billing_periods(reads: list[MeterRead], bills: list[Bill]) -> list[BillingPeriod]:
+    """Pair each read with the first bill dated on or after it (and before the next read), oldest first."""
+    periods: list[BillingPeriod] = []
+    used: set[date] = set()
+    for i, read in enumerate(reads):
+        next_read = reads[i + 1].read_date if i + 1 < len(reads) else None
+        bill = next(
+            (
+                b
+                for b in bills
+                if b.bill_date not in used
+                and read.read_date <= b.bill_date <= read.read_date + timedelta(days=BILL_MATCH_DAYS)
+                and (next_read is None or b.bill_date < next_read)
+            ),
+            None,
+        )
+        if bill:
+            used.add(bill.bill_date)
+        periods.append(BillingPeriod(read=read, bill=bill))
+    return periods
+
+
 def login_error(result: dict[str, Any]) -> SJWaterError:
     """The error for a refused `VXengage_Login`, checked in the same order as the portal's login page."""
     try:
@@ -334,8 +477,12 @@ class SJWaterClient:
             return
         raise login_error(result)
 
+    async def _open(self, view: str) -> str:
+        """Navigate to a signed-in page the way the site does: a form POST of the current token."""
+        return await self._page(f"/{view}", {"Token": self._token, "SitePrefix": self._prefix})
+
     async def _usage_page(self) -> str:
-        return await self._page(f"/{USAGE_VIEW}", {"Token": self._token, "SitePrefix": self._prefix})
+        return await self._open(USAGE_VIEW)
 
     async def accounts(self) -> tuple[str | None, list[str]]:
         """Sign in and list the accounts on this login (the first is the one shown by default)."""
@@ -366,3 +513,9 @@ class SJWaterClient:
             }
         )
         return current, parse_usage(response.get("VXengage_GetHourlyGraph") or {}, now)
+
+    async def fetch_billing(self) -> list[BillingPeriod]:
+        """Meter reads and bills for the selected account. Call right after fetch_usage (same session)."""
+        reads = parse_usage_history(await self._open(USAGE_HISTORY_VIEW))
+        bills = parse_billing_history(await self._open(BILLING_HISTORY_VIEW))
+        return billing_periods(reads, bills)

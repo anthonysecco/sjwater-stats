@@ -1,34 +1,34 @@
 """Sensors for San Jose Water.
 
-Volume sensors have no state_class on purpose: the portal is hours behind, so recorder statistics
-built from these states would land in the wrong hours. Use the imported `sjwater_stats:` statistic
-for the Energy dashboard; these sensors are for cards, alerts and automations.
+Volume sensors have no state_class on purpose: the portal is hours behind and bills weeks after the
+fact, so recorder statistics built from these states would land in the wrong hours. Use the imported
+`sjwater_stats:` statistics for the Energy dashboard; these sensors are for cards and automations.
+Only day-or-longer measures: the portal is too far behind for hour-level ones.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
-    SensorStateClass,
 )
-from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTime, UnitOfVolume, UnitOfVolumeFlowRate
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import SJW_TZ
-from .coordinator import DayTotal, SJWaterConfigEntry, WaterData
+from .api import BillingPeriod
+from .coordinator import SJWaterConfigEntry, SJWaterCoordinator, WaterData
 from .entity import SJWaterEntity
 
 PARALLEL_UPDATES = 0
 
-StateType = float | int | datetime | None
+StateType = float | int | str | datetime | None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -39,20 +39,8 @@ class SJWaterSensorDescription(SensorEntityDescription):
     attrs_fn: Callable[[WaterData], dict[str, Any]] | None = None
 
 
-def _iso(value: datetime | None) -> str | None:
+def _iso(value: datetime | date | None) -> str | None:
     return value.isoformat() if value else None
-
-
-def _day_attrs(fn: Callable[[WaterData], DayTotal]) -> Callable[[WaterData], dict[str, Any]]:
-    def attrs(d: WaterData) -> dict[str, Any]:
-        day = fn(d)
-        return {"date": day.day.isoformat(), "complete": day.complete, "data_through": _iso(_data_through(d))}
-
-    return attrs
-
-
-def _data_through(d: WaterData) -> datetime | None:
-    return (d.last_hour.local_start + timedelta(hours=1)) if d.last_hour else None
 
 
 def _gallons(key: str, value_fn: Callable[[WaterData], float | None], **kwargs: Any) -> SJWaterSensorDescription:
@@ -67,71 +55,85 @@ def _gallons(key: str, value_fn: Callable[[WaterData], float | None], **kwargs: 
     )
 
 
-def _hour_attrs(fn: Callable[[WaterData], Any]) -> Callable[[WaterData], dict[str, Any]]:
-    def attrs(d: WaterData) -> dict[str, Any]:
-        h = fn(d)
-        return {"hour_start": _iso(h.local_start) if h else None}
+def _period_attrs(period: BillingPeriod | None) -> dict[str, Any]:
+    if period is None:
+        return {}
+    return {
+        "period_start": _iso(period.start),
+        "period_end": _iso(period.end),
+        "days": period.read.days,
+        "ccf": period.read.ccf,
+        "bill_date": _iso(period.bill.bill_date) if period.bill else None,
+        "bill_amount": period.bill.amount if period.bill else None,
+    }
 
-    return attrs
+
+def _last(d: WaterData) -> BillingPeriod | None:
+    return d.billing.last_period if d.billing else None
 
 
-def _flow(d: WaterData) -> float | None:
-    return round(d.last_hour.gallons / 60, 2) if d.last_hour else None
+def _last_year(d: WaterData) -> BillingPeriod | None:
+    return d.billing.last_year_period if d.billing else None
 
 
-def _overnight_attrs(d: WaterData) -> dict[str, Any]:
-    w = d.overnight_window
-    return {"window_start": _iso(w[0]) if w else None, "window_end": _iso(w[1]) if w else None}
+def _vs_last_year_attrs(d: WaterData) -> dict[str, Any]:
+    last, before = _last(d), _last_year(d)
+    return {
+        "gallons_per_day": round(last.read.gallons / last.read.days, 1) if last else None,
+        "last_year_gallons_per_day": round(before.read.gallons / before.read.days, 1) if before else None,
+    }
 
 
 SENSORS: tuple[SJWaterSensorDescription, ...] = (
-    _gallons("usage_today", lambda d: d.today.gallons, attrs_fn=_day_attrs(lambda d: d.today)),
-    _gallons("usage_yesterday", lambda d: d.yesterday.gallons, attrs_fn=_day_attrs(lambda d: d.yesterday)),
+    _gallons(
+        "usage_yesterday",
+        lambda d: d.yesterday.gallons,
+        attrs_fn=lambda d: {
+            "date": d.yesterday.day.isoformat(),
+            "complete": d.yesterday.complete,
+            "data_through": _iso(d.data_through),
+        },
+    ),
     _gallons("usage_last_7_days", lambda d: d.last_7_days),
     _gallons("usage_last_30_days", lambda d: d.last_30_days),
+    _gallons("average_daily_usage", lambda d: d.daily_average, attrs_fn=lambda d: {"days": d.days_in_average}),
     _gallons(
-        "average_daily_usage",
-        lambda d: d.daily_average,
-        attrs_fn=lambda d: {"days": d.days_in_average},
+        "period_to_date_usage",
+        lambda d: d.billing.period_to_date if d.billing else None,
+        attrs_fn=lambda d: {
+            "period_start": _iso(d.billing.period_start) if d.billing else None,
+            "days": d.billing.period_days if d.billing else None,
+            "data_through": _iso(d.data_through),
+        },
+    ),
+    _gallons(
+        "last_period_usage",
+        lambda d: p.read.gallons if (p := _last(d)) else None,
+        attrs_fn=lambda d: _period_attrs(_last(d)),
+    ),
+    _gallons(
+        "same_period_last_year_usage",
+        lambda d: p.read.gallons if (p := _last_year(d)) else None,
+        attrs_fn=lambda d: _period_attrs(_last_year(d)),
     ),
     SJWaterSensorDescription(
-        key="yesterday_vs_average",
-        translation_key="yesterday_vs_average",
+        key="period_vs_last_year",
+        translation_key="period_vs_last_year",
         native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=0,
-        value_fn=lambda d: d.yesterday_vs_average,
-    ),
-    _gallons(
-        "last_hour_usage",
-        lambda d: d.last_hour.gallons if d.last_hour else None,
-        attrs_fn=_hour_attrs(lambda d: d.last_hour),
+        value_fn=lambda d: d.billing.vs_last_year if d.billing else None,
+        attrs_fn=_vs_last_year_attrs,
     ),
     SJWaterSensorDescription(
-        key="flow_rate",
-        translation_key="flow_rate",
-        device_class=SensorDeviceClass.VOLUME_FLOW_RATE,
-        native_unit_of_measurement=UnitOfVolumeFlowRate.GALLONS_PER_MINUTE,
-        state_class=SensorStateClass.MEASUREMENT,
+        key="last_bill_amount",
+        translation_key="last_bill_amount",
+        device_class=SensorDeviceClass.MONETARY,
+        native_unit_of_measurement="USD",
         suggested_display_precision=2,
-        value_fn=_flow,
-        attrs_fn=_hour_attrs(lambda d: d.last_hour),
-    ),
-    _gallons(
-        "peak_hour_usage",
-        lambda d: d.peak_hour.gallons if d.peak_hour else None,
-        attrs_fn=_hour_attrs(lambda d: d.peak_hour),
-    ),
-    _gallons("overnight_minimum", lambda d: d.overnight_minimum, attrs_fn=_overnight_attrs),
-    SJWaterSensorDescription(
-        key="continuous_use",
-        translation_key="continuous_use",
-        device_class=SensorDeviceClass.DURATION,
-        native_unit_of_measurement=UnitOfTime.HOURS,
-        state_class=SensorStateClass.MEASUREMENT,
-        suggested_display_precision=0,
-        value_fn=lambda d: d.longest_run_hours,
-        attrs_fn=lambda d: {"run_start": _iso(d.longest_run_start.astimezone(SJW_TZ) if d.longest_run_start else None)},
+        value_fn=lambda d: d.billing.last_bill.amount if d.billing and d.billing.last_bill else None,
+        attrs_fn=lambda d: {
+            "bill_date": _iso(d.billing.last_bill.bill_date) if d.billing and d.billing.last_bill else None
+        },
     ),
     SJWaterSensorDescription(
         key="last_leak_alert",
@@ -145,9 +147,17 @@ SENSORS: tuple[SJWaterSensorDescription, ...] = (
         device_class=SensorDeviceClass.TIMESTAMP,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda d: d.usage.last_updated,
-        attrs_fn=lambda d: {"data_through": _iso(_data_through(d)), "age_hours": d.data_age_hours},
+        attrs_fn=lambda d: {"data_through": _iso(d.data_through), "age_hours": d.data_age_hours},
     ),
 )
+
+ACCOUNT_NUMBER = SensorEntityDescription(
+    key="account_number",
+    translation_key="account_number",
+    entity_category=EntityCategory.DIAGNOSTIC,
+)
+
+SENSOR_KEYS = frozenset({d.key for d in SENSORS} | {ACCOUNT_NUMBER.key})
 
 
 async def async_setup_entry(
@@ -157,7 +167,12 @@ async def async_setup_entry(
 ) -> None:
     """Add the sensors."""
     coordinator = entry.runtime_data
-    async_add_entities(SJWaterSensor(coordinator, description) for description in SENSORS)
+    async_add_entities(
+        [
+            *(SJWaterSensor(coordinator, description) for description in SENSORS),
+            SJWaterAccountSensor(coordinator, ACCOUNT_NUMBER),
+        ]
+    )
 
 
 class SJWaterSensor(SJWaterEntity, SensorEntity):
@@ -175,3 +190,12 @@ class SJWaterSensor(SJWaterEntity, SensorEntity):
         """Context for cards and automations."""
         fn = self.entity_description.attrs_fn
         return fn(self.coordinator.data) if fn else None
+
+
+class SJWaterAccountSensor(SJWaterEntity, SensorEntity):
+    """The San Jose Water account number (diagnostic)."""
+
+    def __init__(self, coordinator: SJWaterCoordinator, description: SensorEntityDescription) -> None:
+        """Show the configured account."""
+        super().__init__(coordinator, description)
+        self._attr_native_value = coordinator.account

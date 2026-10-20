@@ -1,4 +1,4 @@
-"""Leak and unusual-use binary sensors for San Jose Water."""
+"""Leak and data-freshness binary sensors for San Jose Water."""
 
 from __future__ import annotations
 
@@ -15,16 +15,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import (
-    CONF_CONTINUOUS_HOURS,
-    CONF_HIGH_DAY_PERCENT,
-    CONF_HIGH_HOUR_GALLONS,
-    CONF_OVERNIGHT_END,
-    CONF_OVERNIGHT_START,
-    CONF_STALE_HOURS,
-    DEFAULT_OPTIONS,
-    SJW_TZ,
-)
+from .const import CONF_STALE_HOURS, DEFAULT_OPTIONS, PORTAL_LEAK_WINDOW_HOURS, SJW_TZ
 from .coordinator import SJWaterConfigEntry, WaterData
 from .entity import SJWaterEntity
 
@@ -39,46 +30,17 @@ class SJWaterBinaryDescription(BinarySensorEntityDescription):
     attrs_fn: Callable[[WaterData, dict[str, Any]], dict[str, Any]]
 
 
-def _hour(d: Any) -> str | None:
-    return d.start.astimezone(SJW_TZ).isoformat() if d else None
-
-
 BINARY_SENSORS: tuple[SJWaterBinaryDescription, ...] = (
     SJWaterBinaryDescription(
         key="possible_leak",
         translation_key="possible_leak",
         device_class=BinarySensorDeviceClass.MOISTURE,
+        # San Jose Water's own leak flag (the "Possible Leak" series in the hourly data).
         is_on_fn=lambda d: d.possible_leak,
         attrs_fn=lambda d, o: {
-            "reasons": d.leak_reasons,
-            "portal_leak_hour": _hour(d.last_portal_leak),
-            "overnight_minimum_gallons": d.overnight_minimum,
-            "overnight_window": f"{int(o[CONF_OVERNIGHT_START]):02d}:00-{int(o[CONF_OVERNIGHT_END]):02d}:00",
-            "longest_continuous_hours": d.longest_run_hours,
-            "continuous_hours_threshold": o[CONF_CONTINUOUS_HOURS],
-        },
-    ),
-    SJWaterBinaryDescription(
-        key="high_daily_usage",
-        translation_key="high_daily_usage",
-        device_class=BinarySensorDeviceClass.PROBLEM,
-        is_on_fn=lambda d: d.high_daily_usage,
-        attrs_fn=lambda d, o: {
-            "yesterday_gallons": d.yesterday.gallons,
-            "daily_average_gallons": d.daily_average,
-            "percent_of_average": d.yesterday_vs_average,
-            "threshold_percent": o[CONF_HIGH_DAY_PERCENT],
-        },
-    ),
-    SJWaterBinaryDescription(
-        key="high_hourly_usage",
-        translation_key="high_hourly_usage",
-        device_class=BinarySensorDeviceClass.PROBLEM,
-        is_on_fn=lambda d: d.high_hourly_usage,
-        attrs_fn=lambda d, o: {
-            "peak_hour": _hour(d.peak_hour),
-            "peak_gallons": d.peak_hour.gallons if d.peak_hour else None,
-            "threshold_gallons": o[CONF_HIGH_HOUR_GALLONS],
+            "portal_leak_hour": d.last_portal_leak.start.astimezone(SJW_TZ).isoformat() if d.last_portal_leak else None,
+            "leak_hours_last_7_days": d.leak_hours_7_days,
+            "window_hours": PORTAL_LEAK_WINDOW_HOURS,
         },
     ),
     SJWaterBinaryDescription(
@@ -90,6 +52,8 @@ BINARY_SENSORS: tuple[SJWaterBinaryDescription, ...] = (
         attrs_fn=lambda d, o: {"age_hours": d.data_age_hours, "threshold_hours": o[CONF_STALE_HOURS]},
     ),
 )
+
+BINARY_SENSOR_KEYS = frozenset(d.key for d in BINARY_SENSORS)
 
 
 async def async_setup_entry(
@@ -103,7 +67,7 @@ async def async_setup_entry(
 
 
 class SJWaterBinarySensor(SJWaterEntity, BinarySensorEntity):
-    """A leak or unusual-use signal."""
+    """A leak or data-freshness signal."""
 
     entity_description: SJWaterBinaryDescription
 

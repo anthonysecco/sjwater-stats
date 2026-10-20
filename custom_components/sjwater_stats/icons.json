@@ -5,33 +5,24 @@
         "default": "mdi:pipe",
         "state": { "on": "mdi:pipe-leak" }
       },
-      "high_daily_usage": {
-        "default": "mdi:water-check",
-        "state": { "on": "mdi:water-alert" }
-      },
-      "high_hourly_usage": {
-        "default": "mdi:water-check-outline",
-        "state": { "on": "mdi:water-alert-outline" }
-      },
       "data_delayed": {
         "default": "mdi:cloud-check-outline",
         "state": { "on": "mdi:cloud-clock-outline" }
       }
     },
     "sensor": {
-      "usage_today": { "default": "mdi:water" },
       "usage_yesterday": { "default": "mdi:water-outline" },
       "usage_last_7_days": { "default": "mdi:calendar-week" },
       "usage_last_30_days": { "default": "mdi:calendar-month" },
       "average_daily_usage": { "default": "mdi:chart-bell-curve-cumulative" },
-      "yesterday_vs_average": { "default": "mdi:scale-unbalanced" },
-      "last_hour_usage": { "default": "mdi:clock-outline" },
-      "flow_rate": { "default": "mdi:waves-arrow-right" },
-      "peak_hour_usage": { "default": "mdi:arrow-collapse-up" },
-      "overnight_minimum": { "default": "mdi:weather-night" },
-      "continuous_use": { "default": "mdi:timer-sand" },
+      "period_to_date_usage": { "default": "mdi:water" },
+      "last_period_usage": { "default": "mdi:calendar-range" },
+      "same_period_last_year_usage": { "default": "mdi:calendar-arrow-left" },
+      "period_vs_last_year": { "default": "mdi:scale-unbalanced" },
+      "last_bill_amount": { "default": "mdi:receipt-text-outline" },
       "last_leak_alert": { "default": "mdi:pipe-leak" },
-      "data_updated": { "default": "mdi:update" }
+      "data_updated": { "default": "mdi:update" },
+      "account_number": { "default": "mdi:card-account-details-outline" }
     }
   }
 }

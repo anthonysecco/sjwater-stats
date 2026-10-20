@@ -8,7 +8,7 @@ from unittest.mock import patch
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, InvalidData
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -124,7 +124,20 @@ async def test_options(hass: HomeAssistant) -> None:
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.FORM
-    new = {**DEFAULT_OPTIONS, "high_hour_gallons": 600, "overnight_start": 0, "overnight_end": 5}
+    assert set(result["data_schema"].schema) == {"scan_interval", "stale_hours"}
+    new = {"scan_interval": 12, "stale_hours": 36}
     result = await hass.config_entries.options.async_configure(result["flow_id"], new)
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options["high_hour_gallons"] == 600
+    assert entry.options == {"scan_interval": 12, "stale_hours": 36}
+
+
+async def test_options_interval_range(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=ACCOUNT, data={}, options=dict(DEFAULT_OPTIONS))
+    entry.add_to_hass(hass)
+    assert DEFAULT_OPTIONS["scan_interval"] == 6
+    for hours in (1, 25):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        with pytest.raises(InvalidData):
+            await hass.config_entries.options.async_configure(
+                result["flow_id"], {"scan_interval": hours, "stale_hours": 24}
+            )

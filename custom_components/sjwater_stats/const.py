@@ -18,31 +18,27 @@ CONF_ACCOUNT = "account"
 
 # Options
 CONF_SCAN_INTERVAL = "scan_interval"  # hours
-CONF_HIGH_DAY_PERCENT = "high_day_percent"  # % of the 30-day daily average
-CONF_HIGH_HOUR_GALLONS = "high_hour_gallons"  # gallons in one hour
-CONF_CONTINUOUS_HOURS = "continuous_hours"  # hours of uninterrupted use
-CONF_OVERNIGHT_START = "overnight_start"  # hour of day, 0-23
-CONF_OVERNIGHT_END = "overnight_end"  # hour of day, 0-23 (exclusive)
 CONF_STALE_HOURS = "stale_hours"  # hours without new portal data
 
 DEFAULT_OPTIONS = {
-    CONF_SCAN_INTERVAL: 2,
-    CONF_HIGH_DAY_PERCENT: 200,
-    CONF_HIGH_HOUR_GALLONS: 400,
-    CONF_CONTINUOUS_HOURS: 12,
-    CONF_OVERNIGHT_START: 1,
-    CONF_OVERNIGHT_END: 4,
+    CONF_SCAN_INTERVAL: 6,
     CONF_STALE_HOURS: 24,
 }
-MIN_SCAN_HOURS = 1
-MAX_SCAN_HOURS = 6
+MIN_SCAN_HOURS = 2
+MAX_SCAN_HOURS = 24
+OLD_DEFAULT_SCAN_HOURS = 2  # 0.1.x default; entries still on it move to the new default
 
-# A "high" day must also be at least this many gallons, so tiny averages don't trigger it.
-HIGH_DAY_MIN_GALLONS = 50
 # Recent hours are re-imported on every update in case the portal revises them.
 REIMPORT_HOURS = 48
 # Possible-leak flags from the portal count as current for this long.
 PORTAL_LEAK_WINDOW_HOURS = 48
+
+# Billing
+GALLONS_PER_CCF = 748.052  # 1 CCF (HCF) = 100 cubic feet
+BILL_MATCH_DAYS = 14  # a bill is dated within this many days after its meter read
+FIXED_FIT_PERIODS = 6  # recent bills used to estimate the fixed (non-usage) part of a bill
+COST_REIMPORT_PERIODS = 3  # billed periods rewritten in the cost statistic on every update
+SAME_PERIOD_TOLERANCE_DAYS = 20  # "same period last year" must end within this many days of a year earlier
 
 
 def scan_interval(hours: float) -> timedelta:

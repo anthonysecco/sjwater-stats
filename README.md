@@ -5,11 +5,12 @@
 [![Validate](https://github.com/anthonysecco/sjwater-stats/actions/workflows/validate.yml/badge.svg)](https://github.com/anthonysecco/sjwater-stats/actions/workflows/validate.yml)
 [![Tests](https://github.com/anthonysecco/sjwater-stats/actions/workflows/tests.yml/badge.svg)](https://github.com/anthonysecco/sjwater-stats/actions/workflows/tests.yml)
 
-**See where your water goes, and catch leaks and runaway use early.** This integration reads the hourly readings from your San Jose Water smart meter, using your [SJWaterHUB](https://www.sjwaterhub.com) login. It does three things:
+**See where your water goes and what it costs.** This integration reads your San Jose Water smart meter and bills, using your [SJWaterHUB](https://www.sjwaterhub.com) login. It does four things:
 
-- **Energy dashboard:** puts your hourly water use in the Water section, with up to two years of history on first setup.
-- **Leak alerts:** **Possible leak** turns on for water flowing all night, water that never stops, or a leak flag from San Jose Water itself.
-- **Unusual use alerts:** **High daily usage** and **High hourly usage** turn on for days well above your normal, or a single hour that looks like a hose or sprinkler left running.
+- **Energy dashboard, water:** puts your hourly water use in the Water section, with up to two years of history on first setup.
+- **Energy dashboard, cost:** spreads each bill over the hours it covers, so the Water section shows dollars too.
+- **Billing periods:** last period's use, the same period a year earlier and the change, plus use so far this period.
+- **Leak alerts:** **Possible leak** turns on when San Jose Water flags a possible leak.
 
 > **Unofficial.** This project is not affiliated with or endorsed by San Jose Water. SJWaterHUB has no public API, so this integration signs in the way the website does and reads the same data your browser shows. If San Jose Water changes the site, it can break until it's updated. Please [open an issue](https://github.com/anthonysecco/sjwater-stats/issues) if that happens.
 
@@ -19,8 +20,9 @@
 - [Setup](#setup)
 - [Energy dashboard](#energy-dashboard)
 - [Entities](#entities)
-- [How leaks and unusual use are detected](#how-leaks-and-unusual-use-are-detected)
+- [Leak detection](#leak-detection)
 - [Options](#options)
+- [Upgrading from 0.1](#upgrading-from-01)
 - [Examples](#examples)
 - [Data, timing and privacy](#data-timing-and-privacy)
 - [Troubleshooting](#troubleshooting)
@@ -56,61 +58,59 @@ Copy `custom_components/sjwater_stats` from the [latest release](https://github.
 - If SJWaterHUB wants a **verification code, email confirmation or password change**, setup tells you so. Sign in once at sjwaterhub.com in a browser, then try again.
 - If your password changes later, Home Assistant asks you to sign in again (**Repairs** / **Reconfigure**).
 
-The first update imports all available hourly history, up to two years.
+The first update imports all available hourly history (up to two years) and your billing history.
 
 ## Energy dashboard
 
-**Settings → Dashboards → Energy → Water consumption → Add water source**, then pick **San Jose Water usage (1234)**, where 1234 is the last four digits of your account.
+**Settings → Dashboards → Energy → Water consumption → Add water source**, then:
+1. Pick **San Jose Water usage (1234)**, where 1234 is the last four digits of your account.
+2. Under cost, choose **Use an entity tracking the total costs** and pick **San Jose Water cost (1234)**.
 
-That entry is a long-term statistic the integration writes directly (`sjwater_stats:<account>_water`), one value per hour, in gallons. Home Assistant converts it to liters or m³ if you use metric.
+Both are long-term statistics the integration writes directly, one value per hour: `sjwater_stats:<account>_water` in gallons (Home Assistant converts it to liters or m³ if you use metric) and `sjwater_stats:<account>_water_cost` in your currency.
 
-> **Why not a sensor?** SJWaterHUB publishes each hour's reading 4–6 hours late. A regular sensor would record that water at the time it *arrived*, which is the wrong hour. The imported statistic places every gallon in the hour it was actually used, and it's updated in place when the portal revises recent hours. The sensors below deliberately have no `state_class`, so Home Assistant doesn't build a second, mistimed statistic from them.
+**How cost is spread:** a bill is a fixed service charge plus a usage charge. The integration estimates the fixed part per day from your recent bills, so no rate tables are needed. Each bill's fixed part is spread evenly over its hours and the usage part in proportion to each hour's gallons.
+- When the smart meter covers the whole billing period, the hours add up to the bill exactly.
+- For the period the meter only partly covers (your first one), the covered hours get their share.
+- **Hours after your last bill have no cost yet.** They fill in when the next bill appears, every two months.
 
-To add a cost, use the Energy dashboard's **Use a static price** with your $/gallon. San Jose Water bills per CCF, and 1 CCF is 748 gallons. Divide your $/CCF rate by 748.
+> **Why not a sensor?** SJWaterHUB publishes each hour's reading 4–6 hours late, and bills weeks after the fact. A regular sensor would record that water and money at the time they *arrived*, which is the wrong hour. The imported statistics place every gallon and dollar in the hour it belongs to. The sensors below deliberately have no `state_class`, so Home Assistant doesn't build second, mistimed statistics from them.
 
 ## Entities
 
 Entity IDs assume the default device name **San Jose Water**.
 
-### Alerts (binary sensors)
-| Entity | Turns on when |
-|---|---|
-| `binary_sensor.san_jose_water_possible_leak` | Any leak signal is present (see [detection](#how-leaks-and-unusual-use-are-detected)). The `reasons` attribute lists which one. Device class *moisture*, so it works with leak cards and alerts. |
-| `binary_sensor.san_jose_water_high_daily_usage` | Yesterday used ≥ 200 % of your 30-day daily average (and at least 50 gal). |
-| `binary_sensor.san_jose_water_high_hourly_usage` | Any hour in the last 24 published hours used ≥ 400 gal. |
-| `binary_sensor.san_jose_water_data_delayed` | SJWaterHUB hasn't published new readings for 24 h (diagnostic). |
-
 ### Usage (sensors, gallons)
 | Entity | Meaning |
 |---|---|
-| `sensor.san_jose_water_usage_today` | Today so far, through the latest published hour (`data_through` attribute). |
 | `sensor.san_jose_water_usage_yesterday` | Yesterday's total (`complete` tells you whether all 24 hours are in). |
 | `sensor.san_jose_water_usage_last_7_days` / `_last_30_days` | Rolling totals of complete days. |
 | `sensor.san_jose_water_average_daily_usage` | 30-day daily average, your "normal". |
-| `sensor.san_jose_water_yesterday_vs_average` | Yesterday as a % of that average. |
-| `sensor.san_jose_water_last_hour_usage` | The most recent published hour (`hour_start` attribute). |
-| `sensor.san_jose_water_flow_rate` | That hour's average flow, in gal/min. **Not live:** the meter reports hourly and the data lags 4–6 h. |
-| `sensor.san_jose_water_peak_hourly_usage` | Largest hour in the last 24 published hours. |
-| `sensor.san_jose_water_overnight_minimum` | Lowest hour in last night's quiet window (default 1–4 AM). **0 is what you want.** |
-| `sensor.san_jose_water_continuous_use` | Longest run of back-to-back hours with any use in the last 24 h. |
-| `sensor.san_jose_water_last_leak_alert` | When San Jose Water last flagged a possible leak hour. |
-| `sensor.san_jose_water_data_updated` | When SJWaterHUB last published readings (diagnostic). |
+| `sensor.san_jose_water_usage_this_billing_period` | Smart-meter use since your last meter read (`period_start`, `days` attributes). |
 
-## How leaks and unusual use are detected
-
-Most homes have hours with **no water use at all**, especially overnight. A leak, a running toilet or a stuck irrigation valve removes those quiet hours. **Possible leak** turns on for any of these:
-
-| Reason (`reasons` attribute) | Meaning |
+### Billing
+| Entity | Meaning |
 |---|---|
-| `overnight_flow` | Every hour of last night's quiet window (default 1:00–4:00 AM) used water. |
-| `continuous_use` | Water was used in at least 12 consecutive hours. |
-| `portal_leak_flag` | San Jose Water's own analytics marked an hour in the last 48 h as a possible leak. |
+| `sensor.san_jose_water_last_billing_period_usage` | Gallons billed for the last two-month period. Attributes: `period_start`, `period_end`, `days`, `ccf`, `bill_date`, `bill_amount`. |
+| `sensor.san_jose_water_same_period_last_year_usage` | The same period a year earlier, same attributes. |
+| `sensor.san_jose_water_last_billing_period_vs_last_year` | Change in average daily use between those two periods, in %. Per day, because periods differ by a few days. Matches SJWaterHUB's "Compared to same period last year". |
+| `sensor.san_jose_water_last_bill` | Amount of the latest bill, in USD (`bill_date` attribute). |
 
-**Unusual use:**
-- **High daily usage** compares yesterday with your own 30-day average. It adapts to your household and season.
-- **High hourly usage** catches a single big hour, such as a hose or sprinkler left on. Those typically run 300–600 gal/h.
+### Leaks and diagnostics
+| Entity | Meaning |
+|---|---|
+| `binary_sensor.san_jose_water_possible_leak` | San Jose Water flagged a possible leak in the last 48 published hours (see [leak detection](#leak-detection)). Device class *moisture*, so it works with leak cards and alerts. |
+| `sensor.san_jose_water_last_leak_alert` | When San Jose Water last flagged a possible leak hour. |
+| `binary_sensor.san_jose_water_data_delayed` | SJWaterHUB hasn't published new readings for 24 h (diagnostic). |
+| `sensor.san_jose_water_data_updated` | When SJWaterHUB last published readings (diagnostic). |
+| `sensor.san_jose_water_account_number` | Your San Jose Water account number (diagnostic). |
 
-The meter counts in steps of one cubic foot (7.48 gal), so a very slow drip can show up as an occasional 7-gallon hour rather than a constant flow. A falling **overnight minimum** or a creeping **average daily usage** are early hints worth watching.
+## Leak detection
+
+The integration passes on San Jose Water's own leak analysis. SJWaterHUB marks hours it considers a possible leak (the orange **Possible Leak** bars under Understand Usage). **Possible leak** turns on while such an hour is within the last 48 published hours. Attributes:
+- `portal_leak_hour`: the latest flagged hour.
+- `leak_hours_last_7_days`: how many hours were flagged in the last week.
+
+San Jose Water also says that leaks under about 90 gallons a day may not show up in meter data, so a creeping **average daily usage** is still worth a look.
 
 ## Options
 
@@ -118,21 +118,24 @@ The meter counts in steps of one cubic foot (7.48 gal), so a very slow drip can 
 
 | Option | Default | Notes |
 |---|---|---|
-| Update interval | 2 h | 1–6 h. SJWaterHUB adds readings every few hours, so checking more often doesn't help. Each check signs in and makes about 6 small requests, each with a 30 s timeout. |
-| High daily use threshold | 200 % | Of your 30-day average. |
-| High hourly use threshold | 400 gal | Raise it if your irrigation legitimately uses more in an hour. |
-| Continuous use threshold | 12 h | |
-| Overnight check starts / ends | 1 / 4 | Hours 0–23, end exclusive. **Move this window if your sprinklers run at night**, or set it to when your home is reliably idle. |
+| Update interval | 6 h | 2–24 h. SJWaterHUB publishes hours a few hours late and bills every two months, so checking more often doesn't help. Each check signs in and makes about a dozen small requests, each with a 30 s timeout. |
 | Data delayed after | 24 h | |
+
+## Upgrading from 0.1
+
+0.2 drops the hour-level sensors and the integration's own leak heuristics, because the portal publishes hours too late for them to be useful. The entities below are **removed automatically** on upgrade, so update any automations or cards that use them:
+- `usage_today`, `last_hour_usage`, `flow_rate`, `peak_hourly_usage`, `overnight_minimum`, `continuous_use`, `yesterday_vs_average`
+- `binary_sensor.…_high_daily_usage` and `binary_sensor.…_high_hourly_usage`
+
+The matching options (high-use thresholds, continuous use, overnight window) are removed too. An update interval still on the old 2 h default moves to 6 h.
 
 ## Examples
 
 Ready-to-use automations and cards are in **[docs/automations.md](docs/automations.md)**:
 - Leak alert to your phone
 - Shutting the main valve
-- Morning high-use report
+- New bill report, compared with last year
 - Weekly water summary
-- Irrigation sanity check
 - Dashboard cards
 
 A quick one:
@@ -147,20 +150,20 @@ actions:
     data:
       title: "Possible water leak"
       message: >
-        {{ state_attr('binary_sensor.san_jose_water_possible_leak', 'reasons') | join(', ') | replace('_', ' ') }}.
-        Overnight minimum {{ states('sensor.san_jose_water_overnight_minimum') }} gal,
-        {{ states('sensor.san_jose_water_continuous_use') }} h of continuous use.
+        San Jose Water flagged a possible leak at
+        {{ state_attr('binary_sensor.san_jose_water_possible_leak', 'portal_leak_hour') | as_datetime | as_local | as_timestamp | timestamp_custom('%a %-I %p') }}.
 ```
 
 ## Data, timing and privacy
 
-- **Lag:** SJWaterHUB publishes readings about every 4–6 hours. Alerts are about the last published hours, not right now. The `data_through` attributes say how current they are.
-- **Polling:** every 2 hours by default. Each check signs in, opens the usage page and fetches the hourly data, about 6 requests.
+- **Lag:** SJWaterHUB publishes readings about every 4–6 hours and bills every two months. Values are about the last published hours, not right now. The `data_through` attributes say how current they are.
+- **Polling:** every 6 hours by default. Each check signs in, opens the usage page, fetches the hourly data, then opens Usage History and Billing History: about a dozen requests. If billing can't be read, the hourly data still updates and the last billing values are kept.
 - **Daylight saving:** the portal labels hours in Pacific clock time. The integration converts them correctly, merging the nonexistent spring-forward hour into the next one.
 - **Privacy:**
   - Your username and password are stored in Home Assistant's config entry, like any other integration, and are only sent to sjwaterhub.com.
   - Diagnostics downloads redact them and your account number.
-  - The integration doesn't read or store your name, address or billing details.
+  - The account number sensor shows your account number in Home Assistant; disable it if you share your dashboards.
+  - The integration reads bill dates and amounts and meter reads. It doesn't read or store your name or address.
 - **Tests** use synthetic data that only mimics the portal's format. No real customer data is in this repository.
 
 ## Troubleshooting
@@ -170,6 +173,8 @@ actions:
 - **"Verification step":** sign in once in a browser and complete what it asks, then retry.
 - **"No hourly smart-meter readings":** your meter hasn't been upgraded yet, or its data isn't connected. Check **Understand Usage** on the website.
 - **Energy dashboard shows nothing for today:** that's expected until SJWaterHUB publishes the hours. Look again in a few hours.
+- **No cost for recent days:** expected until the bill for that period appears.
+- **Billing sensors are unknown:** the log says why ("billing history unavailable"). The hourly data keeps updating.
 - **Debug logging:**
   ```yaml
   logger:
@@ -187,7 +192,7 @@ ruff check .
 pytest
 ```
 
-`tests/portal.py` is a synthetic SJWaterHUB. It produces the portal's exact response shapes, including daylight-saving days and zero-padded future hours, so the whole flow is tested without an account.
+`tests/portal.py` is a synthetic SJWaterHUB. It produces the portal's exact response and page shapes, including daylight-saving days, zero-padded future hours and the billing pages, so the whole flow is tested without an account.
 
 ## License
 

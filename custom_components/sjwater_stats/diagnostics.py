@@ -28,16 +28,23 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: SJWater
             "last_hour": hours[-1].start.isoformat() if hours else None,
             "unavailable_hours": sum(1 for h in hours if h.unavailable),
             "leak_flag_hours": sum(1 for h in hours if h.possible_leak),
-            "today": data.today.gallons,
             "yesterday": data.yesterday.gallons,
             "daily_average": data.daily_average,
-            "overnight_minimum": data.overnight_minimum,
-            "longest_run_hours": data.longest_run_hours,
-            "leak_reasons": data.leak_reasons,
-            "high_daily_usage": data.high_daily_usage,
-            "high_hourly_usage": data.high_hourly_usage,
+            "possible_leak": data.possible_leak,
+            "leak_hours_7_days": data.leak_hours_7_days,
             "data_age_hours": data.data_age_hours,
         }
+        billing = data.billing
+        if billing is not None:
+            summary["billing"] = {
+                "periods": len(billing.periods),
+                "billed_periods": sum(1 for p in billing.periods if p.bill),
+                "first_read": billing.periods[0].end.isoformat() if billing.periods else None,
+                "last_read": billing.periods[-1].end.isoformat() if billing.periods else None,
+                "last_year_period_found": billing.last_year_period is not None,
+                "vs_last_year": billing.vs_last_year,
+                "period_to_date_gallons": billing.period_to_date,
+            }
     return {
         "entry": async_redact_data(dict(entry.data), TO_REDACT),
         "options": dict(entry.options),

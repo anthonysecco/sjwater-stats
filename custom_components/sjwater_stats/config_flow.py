@@ -25,11 +25,6 @@ import voluptuous as vol
 from .api import AccountLocked, InvalidAuth, NoAccounts, NoUsageData, SJWaterClient, SJWaterError, VerificationRequired
 from .const import (
     CONF_ACCOUNT,
-    CONF_CONTINUOUS_HOURS,
-    CONF_HIGH_DAY_PERCENT,
-    CONF_HIGH_HOUR_GALLONS,
-    CONF_OVERNIGHT_END,
-    CONF_OVERNIGHT_START,
     CONF_SCAN_INTERVAL,
     CONF_STALE_HOURS,
     DEFAULT_OPTIONS,
@@ -61,11 +56,6 @@ def _number(minimum: float, maximum: float, step: float, unit: str) -> NumberSel
 
 OPTION_FIELDS = {
     CONF_SCAN_INTERVAL: _number(MIN_SCAN_HOURS, MAX_SCAN_HOURS, 1, "h"),
-    CONF_HIGH_DAY_PERCENT: _number(110, 1000, 10, "%"),
-    CONF_HIGH_HOUR_GALLONS: _number(10, 5000, 10, "gal"),
-    CONF_CONTINUOUS_HOURS: _number(2, 24, 1, "h"),
-    CONF_OVERNIGHT_START: _number(0, 23, 1, "h"),
-    CONF_OVERNIGHT_END: _number(0, 23, 1, "h"),
     CONF_STALE_HOURS: _number(6, 168, 1, "h"),
 }
 
@@ -98,6 +88,7 @@ class SJWaterConfigFlow(ConfigFlow, domain=DOMAIN):
     """Add a San Jose Water account (one entry per account)."""
 
     VERSION = 1
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         """Start a flow."""
