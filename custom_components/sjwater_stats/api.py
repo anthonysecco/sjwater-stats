@@ -25,7 +25,7 @@ from urllib.parse import urljoin
 
 import aiohttp
 
-from .const import BASE_URL, REQUEST_TIMEOUT, SJW_TZ
+from .const import BASE_URL, LOGGER, REQUEST_TIMEOUT, SJW_TZ
 
 USER_AGENT = "HomeAssistant-SJWater-Stats (+https://github.com/anthonysecco/sjwater-stats)"
 BROKER_URL = f"{BASE_URL}/api/WebApi/RequestBroker"
@@ -61,6 +61,10 @@ class SessionExpired(SJWaterError):
 
 class NoUsageData(SJWaterError):
     """The account has no smart-meter (hourly) data."""
+
+
+class NoAccounts(SJWaterError):
+    """The portal says the login has no qualifying accounts."""
 
 
 # --- parsing ---------------------------------------------------------------------
@@ -201,6 +205,39 @@ def parse_usage(graph: dict[str, Any], now: datetime | None = None) -> Usage:
     return Usage(last_updated=last_updated, hours=hours[first:])
 
 
+def login_error(result: dict[str, Any]) -> SJWaterError:
+    """The error for a refused `VXengage_Login`, checked in the same order as the portal's login page."""
+    try:
+        code = int(result.get("ErrorCode") or 0)
+    except (TypeError, ValueError):
+        code = 0
+    detail = f"ErrorCode {code}" + (f", {name}" if (name := result.get("ErrorName")) else "")
+    LOGGER.debug(
+        "Sign-in refused: %s; flags %s; message %r",
+        detail,
+        sorted(k for k, v in result.items() if v is True),
+        result.get("ErrorMessage") or result.get("StatusMessage"),
+    )
+    if result.get("IPAddressBlocked"):
+        return AccountLocked(f"the portal has blocked sign-in from this IP address ({detail})")
+    if result.get("PasswordChangeRequired") or result.get("EmailVerificationRequired"):
+        return VerificationRequired(f"the portal wants a password change or email verification ({detail})")
+    if result.get("ProfileDisabled"):
+        return AccountLocked(f"the SJWaterHUB profile is disabled ({detail})")
+    if code == 1:
+        return SJWaterError(f"the portal reported a general sign-in error ({detail})")
+    if result.get("Restricted") or code == 105:
+        wait = result.get("RestrictedTimeRemainingSeconds")
+        return AccountLocked(f"too many failed sign-ins; try again in {wait or 'a few'} seconds ({detail})")
+    if code == 10:
+        return VerificationRequired(f"the password has expired; change it at sjwaterhub.com ({detail})")
+    if code in (38, 39):
+        return VerificationRequired(f"the portal wants a verification step in a browser ({detail})")
+    if code > 0:
+        return NoAccounts(f"the portal says this login has no qualifying accounts ({detail})")
+    return InvalidAuth(f"username or password not accepted ({detail})")
+
+
 # --- HTTP ------------------------------------------------------------------------
 
 
@@ -249,7 +286,14 @@ class SJWaterClient:
             "POST",
             BROKER_URL,
             data=json.dumps({"Request": json.dumps(payload)}),
-            headers={"Content-Type": "application/json;charset=utf-8", "Accept": "application/json"},
+            headers={
+                "Content-Type": "application/json;charset=utf-8",
+                "Accept": "application/json",
+                # What the site's own jQuery calls send.
+                "X-Requested-With": "XMLHttpRequest",
+                "Origin": BASE_URL,
+                "Referer": f"{BASE_URL}/" if self._view == "Login" else f"{BASE_URL}/{self._view}",
+            },
         )
         try:
             response = json.loads(body)
@@ -264,11 +308,12 @@ class SJWaterClient:
         return response
 
     async def login(self) -> None:
-        """Sign in. Raises InvalidAuth, VerificationRequired or AccountLocked on refusal."""
+        """Sign in. Raises InvalidAuth, VerificationRequired, AccountLocked or NoAccounts on refusal."""
         self._session.cookie_jar.clear()
         body, _ = await self._text("GET", BASE_URL + "/")
         self._token, self._prefix = parse_page_token(body)
         self._view = "Login"
+        await self._permissions()  # the login page does this on load, before signing in
         response = await self._broker(
             {
                 "Actions": "VXengage_Login",
@@ -282,17 +327,12 @@ class SJWaterClient:
             }
         )
         if response.get("Validated") is False:
-            raise InvalidAuth("the portal rejected the sign-in form")
+            raise InvalidAuth(f"the portal rejected the sign-in form: {response.get('ValidationErrors')}")
         result = response.get("VXengage_Login") or {}
         if result.get("Success"):
             await self._page(result.get("RedirectUrl") or "/AccountSummary", {"token": self._token})
             return
-        code = result.get("ErrorCode")
-        if result.get("IPAddressBlocked") or result.get("ProfileDisabled") or result.get("Restricted") or code == 105:
-            raise AccountLocked("sign-in blocked by the portal (too many attempts, or profile disabled)")
-        if result.get("EmailVerificationRequired") or code in (10, 38, 39):
-            raise VerificationRequired("the portal requires a verification step in a browser")
-        raise InvalidAuth("username or password not accepted")
+        raise login_error(result)
 
     async def _usage_page(self) -> str:
         return await self._page(f"/{USAGE_VIEW}", {"Token": self._token, "SitePrefix": self._prefix})

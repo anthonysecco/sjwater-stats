@@ -120,6 +120,7 @@ class FakePortal:
         self.login_result = login_result or {"Success": True, "ValidToken": False, "RedirectUrl": "/AccountSummary"}
         self.calls: list[str] = []
         self.tokens = 0
+        self.permitted: set[str] = set()  # tokens the page-load permissions call has registered
 
     def _token(self) -> str:
         self.tokens += 1
@@ -129,7 +130,7 @@ class FakePortal:
         aioclient_mock.get(BASE_URL + "/", text=page("tok-login"))
         aioclient_mock.post(f"{BASE_URL}/AccountSummary", side_effect=self._summary)
         aioclient_mock.post(f"{BASE_URL}/UnderstandUsage", side_effect=self._usage_page)
-        aioclient_mock.post(PERMISSIONS_URL, text="")
+        aioclient_mock.post(PERMISSIONS_URL, side_effect=self._permissions)
         aioclient_mock.post(BROKER_URL, side_effect=self._broker)
 
     async def _summary(self, method, url, data):
@@ -138,13 +139,20 @@ class FakePortal:
     async def _usage_page(self, method, url, data):
         return AiohttpClientMockResponse(method, url, text=page(self._token(), self.accounts, self.selected))
 
+    async def _permissions(self, method, url, data):
+        self.calls.append("CreateExceptionPermissions")
+        self.permitted.add(data["token"])
+        return AiohttpClientMockResponse(method, url, text="")
+
     async def _broker(self, method, url, data):
         request = json.loads(json.loads(data)["Request"])
         action = request["Actions"]
         self.calls.append(action)
         body: dict[str, Any] = {"Authorized": True, "Validated": True, "Token": self._token()}
         if action == "VXengage_Login":
-            body[action] = self.login_result
+            # What the real portal appears to do: a token that skipped the permissions call looks like a bad password.
+            permitted = request["Token"] in self.permitted
+            body[action] = self.login_result if permitted else {"Success": False, "ErrorCode": 0}
         elif action == "VXengage_UpdateSelectedAccount":
             self.selected = request["SelectedAccountNumber"]
             body[action] = {"Success": True}

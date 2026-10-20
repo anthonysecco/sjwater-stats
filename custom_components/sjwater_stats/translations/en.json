@@ -28,6 +28,7 @@
       "invalid_auth": "Username or password not accepted by SJWaterHUB.",
       "verification_required": "SJWaterHUB wants an extra step first (verification code, email confirmation or password change). Sign in once at sjwaterhub.com in a browser, then try again.",
       "account_locked": "SJWaterHUB has temporarily blocked sign-in for this login (too many attempts or a disabled profile). Wait 15 minutes or check at sjwaterhub.com.",
+      "no_accounts": "SJWaterHUB signed you in but says this login has no qualifying accounts. Check that your account shows at sjwaterhub.com.",
       "no_usage_data": "No hourly smart-meter readings were found for this account. They appear once San Jose Water has installed a smart meter at the address.",
       "cannot_connect": "Could not reach SJWaterHUB, or it answered unexpectedly. Try again later."
     },

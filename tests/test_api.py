@@ -7,9 +7,14 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 
 from custom_components.sjwater_stats.api import (
+    AccountLocked,
+    InvalidAuth,
+    NoAccounts,
     NoUsageData,
     SessionExpired,
     SJWaterError,
+    VerificationRequired,
+    login_error,
     parse_accounts,
     parse_last_updated,
     parse_page_token,
@@ -83,6 +88,20 @@ def test_parse_usage_errors() -> None:
         parse_usage(hourly_graph(value=lambda d, h: 0), NOW)
     with pytest.raises(NoUsageData):
         parse_usage({**hourly_graph(), "ComplexLabels": []}, NOW)
+
+
+def test_login_error_names_the_portal_code() -> None:
+    err = login_error({"Success": False, "ErrorCode": 0})
+    assert type(err) is InvalidAuth
+    assert "ErrorCode 0" in str(err)
+    assert type(login_error({"ErrorCode": "9", "ErrorName": "NoQualifyingAccounts"})) is NoAccounts
+    assert "NoQualifyingAccounts" in str(login_error({"ErrorCode": 9, "ErrorName": "NoQualifyingAccounts"}))
+    assert type(login_error({"ErrorCode": 1})) is SJWaterError
+    assert type(login_error({"ErrorCode": 105, "RestrictedTimeRemainingSeconds": 840})) is AccountLocked
+    assert "840 seconds" in str(login_error({"Restricted": True, "RestrictedTimeRemainingSeconds": 840}))
+    assert type(login_error({"ErrorCode": 39})) is VerificationRequired
+    assert type(login_error({"ErrorCode": None})) is InvalidAuth
+    assert type(login_error({"ErrorCode": "x"})) is InvalidAuth
 
 
 def test_derive_typical_day() -> None:

@@ -165,7 +165,8 @@ actions:
 
 ## Troubleshooting
 
-- **"Username or password not accepted":** check that you can sign in at sjwaterhub.com. Use your SJWaterHUB username, not your account number.
+- **"Username or password not accepted":** check that you can sign in at sjwaterhub.com. Use your SJWaterHUB username, not your account number. The log line names the portal's `ErrorCode`; include it in an issue if a browser sign-in works but the integration's doesn't.
+- **"No qualifying accounts":** SJWaterHUB accepted the login but lists no account for it. Check that the account appears on the website.
 - **"Verification step":** sign in once in a browser and complete what it asks, then retry.
 - **"No hourly smart-meter readings":** your meter hasn't been upgraded yet, or its data isn't connected. Check **Understand Usage** on the website.
 - **Energy dashboard shows nothing for today:** that's expected until SJWaterHUB publishes the hours. Look again in a few hours.

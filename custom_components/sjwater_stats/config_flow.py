@@ -22,7 +22,7 @@ from homeassistant.helpers.selector import (
 )
 import voluptuous as vol
 
-from .api import AccountLocked, InvalidAuth, NoUsageData, SJWaterClient, SJWaterError, VerificationRequired
+from .api import AccountLocked, InvalidAuth, NoAccounts, NoUsageData, SJWaterClient, SJWaterError, VerificationRequired
 from .const import (
     CONF_ACCOUNT,
     CONF_CONTINUOUS_HOURS,
@@ -83,6 +83,8 @@ def _error_key(err: Exception) -> str:
         return "verification_required"
     if isinstance(err, AccountLocked):
         return "account_locked"
+    if isinstance(err, NoAccounts):
+        return "no_accounts"
     if isinstance(err, NoUsageData):
         return "no_usage_data"
     return "cannot_connect"

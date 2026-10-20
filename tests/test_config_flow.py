@@ -42,6 +42,7 @@ async def test_single_account(hass: HomeAssistant, portal: FakePortal, freezer) 
     assert result["data"] == {CONF_USERNAME: "user@example.com", CONF_PASSWORD: "secret", CONF_ACCOUNT: ACCOUNT}
     assert result["options"] == DEFAULT_OPTIONS
     assert result["result"].unique_id == ACCOUNT
+    assert portal.calls[:2] == ["CreateExceptionPermissions", "VXengage_Login"]
 
 
 async def test_choose_between_accounts(hass: HomeAssistant, aioclient_mock, freezer) -> None:
@@ -61,8 +62,16 @@ async def test_choose_between_accounts(hass: HomeAssistant, aioclient_mock, free
     ("login_result", "error"),
     [
         ({"Success": False, "ErrorCode": 0}, "invalid_auth"),
+        ({"Success": False}, "invalid_auth"),
+        ({"Success": False, "ErrorCode": 1}, "cannot_connect"),
+        ({"Success": False, "ErrorCode": 9}, "no_accounts"),
+        ({"Success": False, "ErrorCode": 7}, "no_accounts"),
+        ({"Success": False, "ErrorCode": 10, "ErrorMessage": "u***@example.com"}, "verification_required"),
         ({"Success": False, "ErrorCode": 38, "RedirectUrl": "/Verify"}, "verification_required"),
         ({"Success": False, "Restricted": True, "ErrorCode": 105}, "account_locked"),
+        ({"Success": False, "IPAddressBlocked": True, "ErrorCode": 0}, "account_locked"),
+        ({"Success": False, "ProfileDisabled": True, "ErrorCode": 0}, "account_locked"),
+        ({"Success": False, "EmailVerificationRequired": True, "ErrorCode": 0}, "verification_required"),
     ],
 )
 async def test_sign_in_errors(hass: HomeAssistant, aioclient_mock, freezer, login_result, error) -> None:
