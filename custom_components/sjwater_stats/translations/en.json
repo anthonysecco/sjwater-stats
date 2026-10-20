@@ -55,22 +55,23 @@
   },
   "entity": {
     "binary_sensor": {
-      "possible_leak": { "name": "Possible leak" },
-      "data_delayed": { "name": "Data delayed" }
+      "data_delayed": { "name": "Data delayed" },
+      "leak_alert": { "name": "Leak alert" }
     },
     "sensor": {
-      "usage_yesterday": { "name": "Usage yesterday" },
-      "usage_last_7_days": { "name": "Usage last 7 days" },
-      "usage_last_30_days": { "name": "Usage last 30 days" },
-      "average_daily_usage": { "name": "Average daily usage" },
-      "period_to_date_usage": { "name": "Usage this billing period" },
-      "last_period_usage": { "name": "Last billing period usage" },
-      "same_period_last_year_usage": { "name": "Same period last year usage" },
-      "period_vs_last_year": { "name": "Last billing period vs last year" },
-      "last_bill_amount": { "name": "Last bill" },
-      "last_leak_alert": { "name": "Last leak alert" },
+      "account_number": { "name": "Account number" },
       "data_updated": { "name": "Data updated" },
-      "account_number": { "name": "Account number" }
+      "last_billing_period_cost": { "name": "Last billing period, cost" },
+      "last_billing_period_cost_year_ago": { "name": "Last billing period, cost year ago" },
+      "last_billing_period_usage": { "name": "Last billing period, usage" },
+      "last_billing_period_usage_year_ago": { "name": "Last billing period, usage year ago" },
+      "last_billing_period_vs_year_ago": { "name": "Last billing period, vs year ago" },
+      "leak_alert_last": { "name": "Leak alert, last" },
+      "usage_average_daily": { "name": "Usage average daily" },
+      "usage_last_30_days": { "name": "Usage last 30 days" },
+      "usage_last_7_days": { "name": "Usage last 7 days" },
+      "usage_this_billing_period": { "name": "Usage this billing period" },
+      "usage_yesterday": { "name": "Usage yesterday" }
     }
   }
 }

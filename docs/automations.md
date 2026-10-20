@@ -18,7 +18,7 @@ Ideas for using San Jose Water data to catch leaks and keep usage and cost in ch
 alias: "Water: possible leak"
 triggers:
   - trigger: state
-    entity_id: binary_sensor.san_jose_water_possible_leak
+    entity_id: binary_sensor.san_jose_water_leak_alert
     to: "on"
 actions:
   - action: notify.notify
@@ -26,8 +26,8 @@ actions:
       title: "💧 Possible water leak"
       message: >-
         San Jose Water flagged a possible leak at
-        {{ state_attr('binary_sensor.san_jose_water_possible_leak', 'portal_leak_hour') | as_datetime | as_local | as_timestamp | timestamp_custom('%a %-I %p') }}
-        ({{ state_attr('binary_sensor.san_jose_water_possible_leak', 'leak_hours_last_7_days') }} flagged hours this week).
+        {{ state_attr('binary_sensor.san_jose_water_leak_alert', 'portal_leak_hour') | as_datetime | as_local | as_timestamp | timestamp_custom('%a %-I %p') }}
+        ({{ state_attr('binary_sensor.san_jose_water_leak_alert', 'leak_hours_last_7_days') }} flagged hours this week).
         Check toilets, faucets, irrigation valves and the water heater.
 mode: single
 ```
@@ -40,7 +40,7 @@ mode: single
 alias: "Water: close main valve on leak while away"
 triggers:
   - trigger: state
-    entity_id: binary_sensor.san_jose_water_possible_leak
+    entity_id: binary_sensor.san_jose_water_leak_alert
     to: "on"
 conditions:
   - condition: state
@@ -65,19 +65,19 @@ Runs when a new bill appears (every two months) and compares the period with a y
 alias: "Water: new bill"
 triggers:
   - trigger: state
-    entity_id: sensor.san_jose_water_last_bill
+    entity_id: sensor.san_jose_water_last_billing_period_cost
 conditions:
   - condition: template
     value_template: "{{ trigger.from_state.state not in ['unknown', 'unavailable'] and trigger.to_state.state not in ['unknown', 'unavailable'] }}"
 actions:
   - action: notify.notify
     data:
-      title: "New water bill: ${{ states('sensor.san_jose_water_last_bill') }}"
+      title: "New water bill: ${{ states('sensor.san_jose_water_last_billing_period_cost') }}"
       message: >-
         {% set p = 'sensor.san_jose_water_last_billing_period_usage' %}
         {{ states(p) | int }} gal over {{ state_attr(p, 'days') }} days
         ({{ state_attr(p, 'period_start') }} to {{ state_attr(p, 'period_end') }}).
-        {% set change = states('sensor.san_jose_water_last_billing_period_vs_last_year') | float(none) %}
+        {% set change = states('sensor.san_jose_water_last_billing_period_vs_year_ago') | float(none) %}
         {% if change is not none %}{{ change | abs | round(0) | int }}% {{ 'more' if change > 0 else 'less' }} per day than the same period last year.{% endif %}
 ```
 
@@ -98,7 +98,7 @@ actions:
       message: >-
         Last 7 days: {{ states('sensor.san_jose_water_usage_last_7_days') | int }} gal
         ({{ (states('sensor.san_jose_water_usage_last_7_days') | float(0) / 7) | round(0) | int }} gal/day,
-        30-day average {{ states('sensor.san_jose_water_average_daily_usage') | int }} gal/day).
+        30-day average {{ states('sensor.san_jose_water_usage_average_daily') | int }} gal/day).
         This billing period so far: {{ states('sensor.san_jose_water_usage_this_billing_period') | int }} gal
         in {{ state_attr('sensor.san_jose_water_usage_this_billing_period', 'days') }} days.
 ```
@@ -119,7 +119,7 @@ conditions:
   - condition: template
     value_template: >-
       {{ states('sensor.san_jose_water_usage_yesterday') | float(0)
-         > 4 * states('sensor.san_jose_water_average_daily_usage') | float(0) }}
+         > 4 * states('sensor.san_jose_water_usage_average_daily') | float(0) }}
 actions:
   - action: notify.notify
     data:
@@ -132,7 +132,7 @@ actions:
 type: vertical-stack
 cards:
   - type: tile
-    entity: binary_sensor.san_jose_water_possible_leak
+    entity: binary_sensor.san_jose_water_leak_alert
   - type: grid
     columns: 2
     square: false
@@ -140,15 +140,15 @@ cards:
       - type: tile
         entity: sensor.san_jose_water_usage_yesterday
       - type: tile
-        entity: sensor.san_jose_water_average_daily_usage
+        entity: sensor.san_jose_water_usage_average_daily
       - type: tile
         entity: sensor.san_jose_water_usage_this_billing_period
       - type: tile
-        entity: sensor.san_jose_water_last_billing_period_vs_last_year
+        entity: sensor.san_jose_water_last_billing_period_vs_year_ago
       - type: tile
-        entity: sensor.san_jose_water_last_bill
+        entity: sensor.san_jose_water_last_billing_period_cost
       - type: tile
-        entity: sensor.san_jose_water_same_period_last_year_usage
+        entity: sensor.san_jose_water_last_billing_period_usage_year_ago
   - type: statistics-graph
     title: Water use, last 30 days
     chart_type: bar
@@ -181,7 +181,7 @@ The **Energy dashboard** (water section) also gives day, week, month and year vi
 
 Gallons per person per day (the U.S. average is about 80):
 ```jinja
-{{ (states('sensor.san_jose_water_average_daily_usage') | float(0) / 3) | round(0) }}  {# 3 people #}
+{{ (states('sensor.san_jose_water_usage_average_daily') | float(0) / 3) | round(0) }}  {# 3 people #}
 ```
 
 Projected use for this billing period in CCF (periods are about 60 days, 1 CCF = 748 gal):

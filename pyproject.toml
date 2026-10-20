@@ -1,6 +1,6 @@
 [project]
 name = "sjwater-stats"
-version = "0.2.0"
+version = "0.2.1"
 description = "Home Assistant integration for San Jose Water smart-meter usage, leak and high-use alerts"
 requires-python = ">=3.13"
 license = "MIT"

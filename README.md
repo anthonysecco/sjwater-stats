@@ -10,7 +10,7 @@
 - **Energy dashboard, water:** puts your hourly water use in the Water section, with up to two years of history on first setup.
 - **Energy dashboard, cost:** spreads each bill over the hours it covers, so the Water section shows dollars too.
 - **Billing periods:** last period's use, the same period a year earlier and the change, plus use so far this period.
-- **Leak alerts:** **Possible leak** turns on when San Jose Water flags a possible leak.
+- **Leak alerts:** **Leak alert** turns on when San Jose Water flags a possible leak.
 
 > **Unofficial.** This project is not affiliated with or endorsed by San Jose Water. SJWaterHUB has no public API, so this integration signs in the way the website does and reads the same data your browser shows. If San Jose Water changes the site, it can break until it's updated. Please [open an issue](https://github.com/anthonysecco/sjwater-stats/issues) if that happens.
 
@@ -22,7 +22,7 @@
 - [Entities](#entities)
 - [Leak detection](#leak-detection)
 - [Options](#options)
-- [Upgrading from 0.1](#upgrading-from-01)
+- [Upgrading](#upgrading)
 - [Examples](#examples)
 - [Data, timing and privacy](#data-timing-and-privacy)
 - [Troubleshooting](#troubleshooting)
@@ -77,40 +77,43 @@ Both are long-term statistics the integration writes directly, one value per hou
 
 ## Entities
 
-Entity IDs assume the default device name **San Jose Water**.
+Entity IDs assume the default device name **San Jose Water**. Names follow "group, detail" (Account, Data, Last billing period, Leak, Usage), so related entities sort together.
 
 ### Usage (sensors, gallons)
 | Entity | Meaning |
 |---|---|
 | `sensor.san_jose_water_usage_yesterday` | Yesterday's total (`complete` tells you whether all 24 hours are in). |
 | `sensor.san_jose_water_usage_last_7_days` / `_last_30_days` | Rolling totals of complete days. |
-| `sensor.san_jose_water_average_daily_usage` | 30-day daily average, your "normal". |
+| `sensor.san_jose_water_usage_average_daily` | 30-day daily average, your "normal". |
 | `sensor.san_jose_water_usage_this_billing_period` | Smart-meter use since your last meter read (`period_start`, `days` attributes). |
 
-### Billing
+### Last billing period
+"Last billing period" is the latest period that has its bill. A new meter read is billed a few days later; until then these sensors stay on the previous period, so usage, cost and the comparison always describe the same period. The year-ago period is the one whose read date is closest to 12 months earlier.
+
 | Entity | Meaning |
 |---|---|
-| `sensor.san_jose_water_last_billing_period_usage` | Gallons billed for the last two-month period. Attributes: `period_start`, `period_end`, `days`, `ccf`, `bill_date`, `bill_amount`. |
-| `sensor.san_jose_water_same_period_last_year_usage` | The same period a year earlier, same attributes. |
-| `sensor.san_jose_water_last_billing_period_vs_last_year` | Change in average daily use between those two periods, in %. Per day, because periods differ by a few days. Matches SJWaterHUB's "Compared to same period last year". |
-| `sensor.san_jose_water_last_bill` | Amount of the latest bill, in USD (`bill_date` attribute). |
+| `sensor.san_jose_water_last_billing_period_cost` | That period's bill, in USD. Attributes: `period_start`, `period_end`, `days`, `ccf`, `bill_date`, `bill_amount`. |
+| `sensor.san_jose_water_last_billing_period_cost_year_ago` | The year-ago period's bill, same attributes. |
+| `sensor.san_jose_water_last_billing_period_usage` | Gallons billed for that period, same attributes. |
+| `sensor.san_jose_water_last_billing_period_usage_year_ago` | Gallons billed for the year-ago period, same attributes. |
+| `sensor.san_jose_water_last_billing_period_vs_year_ago` | Change in average daily use between the two, in %. Per day, because periods differ by a few days; matches SJWaterHUB's "Compared to same period last year". Attributes give both periods' dates and gallons per day. |
 
 ### Leaks and diagnostics
 | Entity | Meaning |
 |---|---|
-| `binary_sensor.san_jose_water_possible_leak` | San Jose Water flagged a possible leak in the last 48 published hours (see [leak detection](#leak-detection)). Device class *moisture*, so it works with leak cards and alerts. |
-| `sensor.san_jose_water_last_leak_alert` | When San Jose Water last flagged a possible leak hour. |
+| `binary_sensor.san_jose_water_leak_alert` | **Leak alert:** San Jose Water flagged a possible leak in the last 48 published hours (see [leak detection](#leak-detection)). Device class *moisture*, so it works with leak cards and alerts. |
+| `sensor.san_jose_water_leak_alert_last` | When San Jose Water last flagged a possible leak hour. |
 | `binary_sensor.san_jose_water_data_delayed` | SJWaterHUB hasn't published new readings for 24 h (diagnostic). |
 | `sensor.san_jose_water_data_updated` | When SJWaterHUB last published readings (diagnostic). |
 | `sensor.san_jose_water_account_number` | Your San Jose Water account number (diagnostic). |
 
 ## Leak detection
 
-The integration passes on San Jose Water's own leak analysis. SJWaterHUB marks hours it considers a possible leak (the orange **Possible Leak** bars under Understand Usage). **Possible leak** turns on while such an hour is within the last 48 published hours. Attributes:
+The integration passes on San Jose Water's own leak analysis. SJWaterHUB marks hours it considers a possible leak (the orange **Possible Leak** bars under Understand Usage). **Leak alert** turns on while such an hour is within the last 48 published hours. Attributes:
 - `portal_leak_hour`: the latest flagged hour.
 - `leak_hours_last_7_days`: how many hours were flagged in the last week.
 
-San Jose Water also says that leaks under about 90 gallons a day may not show up in meter data, so a creeping **average daily usage** is still worth a look.
+San Jose Water also says that leaks under about 90 gallons a day may not show up in meter data, so a creeping **Usage average daily** is still worth a look.
 
 ## Options
 
@@ -121,13 +124,26 @@ San Jose Water also says that leaks under about 90 gallons a day may not show up
 | Update interval | 6 h | 2–24 h. SJWaterHUB publishes hours a few hours late and bills every two months, so checking more often doesn't help. Each check signs in and makes about a dozen small requests, each with a 30 s timeout. |
 | Data delayed after | 24 h | |
 
-## Upgrading from 0.1
+## Upgrading
 
-0.2 drops the hour-level sensors and the integration's own leak heuristics, because the portal publishes hours too late for them to be useful. The entities below are **removed automatically** on upgrade, so update any automations or cards that use them:
+**From 0.1:** 0.2 drops the hour-level sensors and the integration's own leak heuristics, because the portal publishes hours too late for them to be useful. The entities below are **removed automatically** on upgrade, so update any automations or cards that use them:
 - `usage_today`, `last_hour_usage`, `flow_rate`, `peak_hourly_usage`, `overnight_minimum`, `continuous_use`, `yesterday_vs_average`
 - `binary_sensor.…_high_daily_usage` and `binary_sensor.…_high_hourly_usage`
 
 The matching options (high-use thresholds, continuous use, overnight window) are removed too. An update interval still on the old 2 h default moves to 6 h.
+
+**From 0.2.0:** 0.2.1 renames entities so they sort into groups. The old ones are removed automatically on update:
+
+| 0.2.0 | 0.2.1 |
+|---|---|
+| `binary_sensor.…_possible_leak` | `binary_sensor.…_leak_alert` |
+| `sensor.…_last_leak_alert` | `sensor.…_leak_alert_last` |
+| `sensor.…_average_daily_usage` | `sensor.…_usage_average_daily` |
+| `sensor.…_last_bill` | `sensor.…_last_billing_period_cost` |
+| `sensor.…_same_period_last_year_usage` | `sensor.…_last_billing_period_usage_year_ago` |
+| `sensor.…_last_billing_period_vs_last_year` | `sensor.…_last_billing_period_vs_year_ago` |
+
+New: `sensor.…_last_billing_period_cost_year_ago`.
 
 ## Examples
 
@@ -143,7 +159,7 @@ A quick one:
 alias: "Water: possible leak"
 triggers:
   - trigger: state
-    entity_id: binary_sensor.san_jose_water_possible_leak
+    entity_id: binary_sensor.san_jose_water_leak_alert
     to: "on"
 actions:
   - action: notify.notify
@@ -151,7 +167,7 @@ actions:
       title: "Possible water leak"
       message: >
         San Jose Water flagged a possible leak at
-        {{ state_attr('binary_sensor.san_jose_water_possible_leak', 'portal_leak_hour') | as_datetime | as_local | as_timestamp | timestamp_custom('%a %-I %p') }}.
+        {{ state_attr('binary_sensor.san_jose_water_leak_alert', 'portal_leak_hour') | as_datetime | as_local | as_timestamp | timestamp_custom('%a %-I %p') }}.
 ```
 
 ## Data, timing and privacy

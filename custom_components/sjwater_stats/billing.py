@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 
-from .api import Bill, BillingPeriod, HourReading
+from .api import BillingPeriod, HourReading
 from .const import FIXED_FIT_PERIODS, SAME_PERIOD_TOLERANCE_DAYS, SJW_TZ
 
 
@@ -114,23 +114,23 @@ class BillingData:
     """What the billing sensors read."""
 
     periods: list[BillingPeriod]
-    last_period: BillingPeriod | None
+    last_period: BillingPeriod | None  # latest billed period (usage, cost and comparison stay in step)
     last_year_period: BillingPeriod | None
     vs_last_year: float | None
-    last_bill: Bill | None
-    period_start: date | None
+    period_start: date | None  # current period: since the latest meter read, billed or not
     period_to_date: float | None
     period_days: float | None
 
 
 def derive_billing(periods: list[BillingPeriod], hours: list[HourReading], data_end: datetime | None) -> BillingData:
     """Billing sensors from the periods and the smart meter's published hours (up to `data_end`)."""
-    last = periods[-1] if periods else None
+    newest = periods[-1] if periods else None
+    # A read is billed a few days later; until then keep showing the last period that has its bill.
+    last = next((p for p in reversed(periods) if p.bill), newest)
     last_year = same_period_last_year(periods, last) if last else None
-    billed = [p.bill for p in periods if p.bill]
     to_date = days = None
-    if last and data_end:
-        start, _ = period_bounds(last.end, last.end)
+    if newest and data_end:
+        start, _ = period_bounds(newest.end, newest.end)
         if data_end >= start:
             to_date = round(sum(h.gallons for h in hours if not h.unavailable and h.start >= start), 1)
             days = round((data_end - start) / timedelta(days=1), 1)
@@ -139,8 +139,7 @@ def derive_billing(periods: list[BillingPeriod], hours: list[HourReading], data_
         last_period=last,
         last_year_period=last_year,
         vs_last_year=percent_change_per_day(last, last_year) if last and last_year else None,
-        last_bill=billed[-1] if billed else None,
-        period_start=last.end if last else None,
+        period_start=newest.end if newest else None,
         period_to_date=to_date,
         period_days=days,
     )

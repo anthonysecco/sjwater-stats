@@ -269,7 +269,7 @@ def test_derive_billing() -> None:
     assert billing.last_period.end == date(2026, 9, 24)
     assert billing.last_year_period.end == date(2025, 9, 23)
     assert billing.vs_last_year == 32.2
-    assert billing.last_bill.amount == bill_amount(59, 13.0)
+    assert billing.last_period.bill.amount == bill_amount(59, 13.0)
     assert billing.period_start == date(2026, 9, 24)
     start = datetime(2026, 9, 24, tzinfo=SJW_TZ)
     expected = 0.0
@@ -279,3 +279,15 @@ def test_derive_billing() -> None:
         day += timedelta(days=1)
     assert billing.period_to_date == expected
     assert billing.period_days == round((datetime(2026, 10, 19, 18, tzinfo=SJW_TZ) - start).total_seconds() / 86400, 1)
+
+
+def test_derive_billing_before_the_bill_posts() -> None:
+    # The 2026-09-24 read is in, its bill isn't yet: the "last billing period" sensors stay on the billed
+    # period (usage, cost and comparison together) while "this billing period" starts at the new read.
+    reads = parse_usage_history(usage_history_page("t", READS))
+    periods = billing_periods(reads, [Bill(d, a) for d, a in BILLS[:-1]])
+    billing = derive(parse_usage(hourly_graph(), NOW), {}, NOW, periods).billing
+    assert billing.last_period.end == date(2026, 7, 27)
+    assert billing.last_period.bill.amount == bill_amount(60, 14.0)
+    assert billing.last_year_period.end == date(2025, 7, 25)
+    assert billing.period_start == date(2026, 9, 24)

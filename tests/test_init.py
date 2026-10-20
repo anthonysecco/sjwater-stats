@@ -76,7 +76,7 @@ async def test_setup_entities_and_statistics(recorder_mock, hass: HomeAssistant,
     assert yesterday.attributes["unit_of_measurement"] == "gal"
     assert yesterday.attributes["device_class"] == "water"
     assert "state_class" not in yesterday.attributes  # statistics come from the import, not this sensor
-    assert hass.states.get("binary_sensor.san_jose_water_possible_leak").state == "off"
+    assert hass.states.get("binary_sensor.san_jose_water_leak_alert").state == "off"
     assert hass.states.get("binary_sensor.san_jose_water_data_delayed").state == "off"
     for retired in (
         "sensor.san_jose_water_usage_today",
@@ -89,13 +89,22 @@ async def test_setup_entities_and_statistics(recorder_mock, hass: HomeAssistant,
     # Billing sensors (made-up tariff in tests/portal.py).
     last_period = hass.states.get("sensor.san_jose_water_last_billing_period_usage")
     assert float(last_period.state) == round(13 * 748.052, 1)
-    last_year = hass.states.get("sensor.san_jose_water_same_period_last_year_usage")
+    last_year = hass.states.get("sensor.san_jose_water_last_billing_period_usage_year_ago")
     assert float(last_year.state) == round(10 * 748.052, 1)
     assert last_year.attributes["period_end"] == "2025-09-23"
-    assert float(hass.states.get("sensor.san_jose_water_last_billing_period_vs_last_year").state) == 32.2
-    bill = hass.states.get("sensor.san_jose_water_last_bill")
+    vs = hass.states.get("sensor.san_jose_water_last_billing_period_vs_year_ago")
+    assert float(vs.state) == 32.2
+    assert vs.attributes["period_start"] == "2026-07-27"
+    assert vs.attributes["year_ago_period_start"] == "2025-07-25"
+    assert vs.attributes["year_ago_period_end"] == "2025-09-23"
+    bill = hass.states.get("sensor.san_jose_water_last_billing_period_cost")
     assert float(bill.state) == bill_amount(59, 13.0)
     assert bill.attributes["unit_of_measurement"] == "USD"
+    assert bill.attributes["bill_date"] == "2026-09-28"
+    cost_year_ago = hass.states.get("sensor.san_jose_water_last_billing_period_cost_year_ago")
+    assert float(cost_year_ago.state) == bill_amount(60, 10.0)
+    assert hass.states.get("sensor.san_jose_water_usage_average_daily") is not None
+    assert hass.states.get("sensor.san_jose_water_leak_alert_last") is not None
     this_period = hass.states.get("sensor.san_jose_water_usage_this_billing_period")
     assert this_period.attributes["period_start"] == "2026-09-24"
     registry = er.async_get(hass)
@@ -157,7 +166,7 @@ async def test_billing_failure_keeps_hourly(recorder_mock, hass: HomeAssistant, 
     entry = await _setup(hass)
     assert entry.state is ConfigEntryState.LOADED
     assert float(hass.states.get("sensor.san_jose_water_usage_yesterday").state) == 531
-    assert hass.states.get("sensor.san_jose_water_last_bill").state == "unknown"
+    assert hass.states.get("sensor.san_jose_water_last_billing_period_cost").state == "unknown"
     assert await _hourly_rows(hass)
     assert not await _hourly_rows(hass, COST_ID)
 
@@ -174,10 +183,13 @@ async def test_retired_entities_removed(recorder_mock, hass: HomeAssistant, port
     entry.add_to_hass(hass)
     registry = er.async_get(hass)
     old = registry.async_get_or_create("sensor", DOMAIN, f"{ACCOUNT}_flow_rate", config_entry=entry)
+    renamed = registry.async_get_or_create("binary_sensor", DOMAIN, f"{ACCOUNT}_possible_leak", config_entry=entry)
     kept = registry.async_get_or_create("sensor", DOMAIN, f"{ACCOUNT}_usage_yesterday", config_entry=entry)
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert registry.async_get(old.entity_id) is None
+    assert registry.async_get(renamed.entity_id) is None
+    assert registry.async_get_entity_id("binary_sensor", DOMAIN, f"{ACCOUNT}_leak_alert") is not None
     assert registry.async_get(kept.entity_id) is not None
 
 

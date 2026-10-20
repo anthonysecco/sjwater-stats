@@ -32,8 +32,8 @@ class SJWaterBinaryDescription(BinarySensorEntityDescription):
 
 BINARY_SENSORS: tuple[SJWaterBinaryDescription, ...] = (
     SJWaterBinaryDescription(
-        key="possible_leak",
-        translation_key="possible_leak",
+        key="leak_alert",
+        translation_key="leak_alert",
         device_class=BinarySensorDeviceClass.MOISTURE,
         # San Jose Water's own leak flag (the "Possible Leak" series in the hourly data).
         is_on_fn=lambda d: d.possible_leak,

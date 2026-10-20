@@ -76,14 +76,39 @@ def _last_year(d: WaterData) -> BillingPeriod | None:
     return d.billing.last_year_period if d.billing else None
 
 
-def _vs_last_year_attrs(d: WaterData) -> dict[str, Any]:
+def _per_day(period: BillingPeriod | None) -> float | None:
+    return round(period.read.gallons / period.read.days, 1) if period and period.read.days else None
+
+
+def _vs_year_ago_attrs(d: WaterData) -> dict[str, Any]:
     last, before = _last(d), _last_year(d)
     return {
-        "gallons_per_day": round(last.read.gallons / last.read.days, 1) if last else None,
-        "last_year_gallons_per_day": round(before.read.gallons / before.read.days, 1) if before else None,
+        "period_start": _iso(last.start) if last else None,
+        "period_end": _iso(last.end) if last else None,
+        "gallons_per_day": _per_day(last),
+        "year_ago_period_start": _iso(before.start) if before else None,
+        "year_ago_period_end": _iso(before.end) if before else None,
+        "year_ago_gallons_per_day": _per_day(before),
     }
 
 
+def _cost(key: str, period_fn: Callable[[WaterData], BillingPeriod | None]) -> SJWaterSensorDescription:
+    def value(d: WaterData) -> float | None:
+        period = period_fn(d)
+        return period.bill.amount if period and period.bill else None
+
+    return SJWaterSensorDescription(
+        key=key,
+        translation_key=key,
+        device_class=SensorDeviceClass.MONETARY,
+        native_unit_of_measurement="USD",
+        suggested_display_precision=2,
+        value_fn=value,
+        attrs_fn=lambda d: _period_attrs(period_fn(d)),
+    )
+
+
+# Names follow "group, detail" so related sensors sort together: Account, Data, Last billing period, Leak, Usage.
 SENSORS: tuple[SJWaterSensorDescription, ...] = (
     _gallons(
         "usage_yesterday",
@@ -96,9 +121,9 @@ SENSORS: tuple[SJWaterSensorDescription, ...] = (
     ),
     _gallons("usage_last_7_days", lambda d: d.last_7_days),
     _gallons("usage_last_30_days", lambda d: d.last_30_days),
-    _gallons("average_daily_usage", lambda d: d.daily_average, attrs_fn=lambda d: {"days": d.days_in_average}),
+    _gallons("usage_average_daily", lambda d: d.daily_average, attrs_fn=lambda d: {"days": d.days_in_average}),
     _gallons(
-        "period_to_date_usage",
+        "usage_this_billing_period",
         lambda d: d.billing.period_to_date if d.billing else None,
         attrs_fn=lambda d: {
             "period_start": _iso(d.billing.period_start) if d.billing else None,
@@ -107,37 +132,28 @@ SENSORS: tuple[SJWaterSensorDescription, ...] = (
         },
     ),
     _gallons(
-        "last_period_usage",
+        "last_billing_period_usage",
         lambda d: p.read.gallons if (p := _last(d)) else None,
         attrs_fn=lambda d: _period_attrs(_last(d)),
     ),
     _gallons(
-        "same_period_last_year_usage",
+        "last_billing_period_usage_year_ago",
         lambda d: p.read.gallons if (p := _last_year(d)) else None,
         attrs_fn=lambda d: _period_attrs(_last_year(d)),
     ),
     SJWaterSensorDescription(
-        key="period_vs_last_year",
-        translation_key="period_vs_last_year",
+        key="last_billing_period_vs_year_ago",
+        translation_key="last_billing_period_vs_year_ago",
         native_unit_of_measurement=PERCENTAGE,
         suggested_display_precision=0,
         value_fn=lambda d: d.billing.vs_last_year if d.billing else None,
-        attrs_fn=_vs_last_year_attrs,
+        attrs_fn=_vs_year_ago_attrs,
     ),
+    _cost("last_billing_period_cost", _last),
+    _cost("last_billing_period_cost_year_ago", _last_year),
     SJWaterSensorDescription(
-        key="last_bill_amount",
-        translation_key="last_bill_amount",
-        device_class=SensorDeviceClass.MONETARY,
-        native_unit_of_measurement="USD",
-        suggested_display_precision=2,
-        value_fn=lambda d: d.billing.last_bill.amount if d.billing and d.billing.last_bill else None,
-        attrs_fn=lambda d: {
-            "bill_date": _iso(d.billing.last_bill.bill_date) if d.billing and d.billing.last_bill else None
-        },
-    ),
-    SJWaterSensorDescription(
-        key="last_leak_alert",
-        translation_key="last_leak_alert",
+        key="leak_alert_last",
+        translation_key="leak_alert_last",
         device_class=SensorDeviceClass.TIMESTAMP,
         value_fn=lambda d: d.last_portal_leak.start if d.last_portal_leak else None,
     ),

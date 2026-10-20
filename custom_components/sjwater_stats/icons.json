@@ -1,28 +1,29 @@
 {
   "entity": {
     "binary_sensor": {
-      "possible_leak": {
-        "default": "mdi:pipe",
-        "state": { "on": "mdi:pipe-leak" }
-      },
       "data_delayed": {
         "default": "mdi:cloud-check-outline",
         "state": { "on": "mdi:cloud-clock-outline" }
+      },
+      "leak_alert": {
+        "default": "mdi:pipe",
+        "state": { "on": "mdi:pipe-leak" }
       }
     },
     "sensor": {
-      "usage_yesterday": { "default": "mdi:water-outline" },
-      "usage_last_7_days": { "default": "mdi:calendar-week" },
-      "usage_last_30_days": { "default": "mdi:calendar-month" },
-      "average_daily_usage": { "default": "mdi:chart-bell-curve-cumulative" },
-      "period_to_date_usage": { "default": "mdi:water" },
-      "last_period_usage": { "default": "mdi:calendar-range" },
-      "same_period_last_year_usage": { "default": "mdi:calendar-arrow-left" },
-      "period_vs_last_year": { "default": "mdi:scale-unbalanced" },
-      "last_bill_amount": { "default": "mdi:receipt-text-outline" },
-      "last_leak_alert": { "default": "mdi:pipe-leak" },
+      "account_number": { "default": "mdi:card-account-details-outline" },
       "data_updated": { "default": "mdi:update" },
-      "account_number": { "default": "mdi:card-account-details-outline" }
+      "last_billing_period_cost": { "default": "mdi:receipt-text-outline" },
+      "last_billing_period_cost_year_ago": { "default": "mdi:receipt-text-clock-outline" },
+      "last_billing_period_usage": { "default": "mdi:calendar-range" },
+      "last_billing_period_usage_year_ago": { "default": "mdi:calendar-arrow-left" },
+      "last_billing_period_vs_year_ago": { "default": "mdi:scale-unbalanced" },
+      "leak_alert_last": { "default": "mdi:pipe-leak" },
+      "usage_average_daily": { "default": "mdi:chart-bell-curve-cumulative" },
+      "usage_last_30_days": { "default": "mdi:calendar-month" },
+      "usage_last_7_days": { "default": "mdi:calendar-week" },
+      "usage_this_billing_period": { "default": "mdi:water" },
+      "usage_yesterday": { "default": "mdi:water-outline" }
     }
   }
 }
