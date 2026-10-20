@@ -9,6 +9,7 @@ from homeassistant.components.recorder.statistics import statistics_during_perio
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
+from homeassistant.util.unit_system import METRIC_SYSTEM, US_CUSTOMARY_SYSTEM
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.components.recorder.common import async_wait_recording_done
 
@@ -22,7 +23,8 @@ NOW = datetime(2026, 10, 19, 19, 30, tzinfo=SJW_TZ)
 STAT_ID = statistic_id_for(ACCOUNT)
 
 
-async def _setup(hass: HomeAssistant) -> MockConfigEntry:
+async def _setup(hass: HomeAssistant, units=US_CUSTOMARY_SYSTEM) -> MockConfigEntry:
+    hass.config.units = units  # metric installs see liters; see test_metric_install_sees_liters
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id=ACCOUNT,
@@ -92,6 +94,14 @@ async def test_setup_entities_and_statistics(recorder_mock, hass: HomeAssistant,
 
     assert portal.calls.count("VXengage_Login") == 2
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_metric_install_sees_liters(recorder_mock, hass: HomeAssistant, portal: FakePortal, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, METRIC_SYSTEM)
+    today = hass.states.get("sensor.san_jose_water_usage_today")
+    assert today.attributes["unit_of_measurement"] == "L"
+    assert round(float(today.state), 1) == round(30 * 3.785411784, 1)
 
 
 async def test_wrong_password_starts_reauth(recorder_mock, hass: HomeAssistant, aioclient_mock, freezer) -> None:
