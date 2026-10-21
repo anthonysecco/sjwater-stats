@@ -210,6 +210,10 @@ pytest
 
 `tests/portal.py` is a synthetic SJWaterHUB. It produces the portal's exact response and page shapes, including daylight-saving days, zero-padded future hours and the billing pages, so the whole flow is tested without an account.
 
+## AI Disclosure
+
+This project was built largely with AI coding tools (Claude). I directed the design and reviewed the changes, but most of the code and documentation was written by AI. Please review the code before relying on it, and open an issue if you find a problem.
+
 ## License
 
 [MIT](LICENSE).
