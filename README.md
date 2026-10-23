@@ -4,6 +4,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/anthonysecco/sjwater-stats)](https://github.com/anthonysecco/sjwater-stats/releases)
 [![Validate](https://github.com/anthonysecco/sjwater-stats/actions/workflows/validate.yml/badge.svg)](https://github.com/anthonysecco/sjwater-stats/actions/workflows/validate.yml)
 [![Tests](https://github.com/anthonysecco/sjwater-stats/actions/workflows/tests.yml/badge.svg)](https://github.com/anthonysecco/sjwater-stats/actions/workflows/tests.yml)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-donate-yellow.svg)](https://www.buymeacoffee.com/anthonysecco)
 
 **See where your water goes and what it costs.** This integration reads your San Jose Water smart meter and bills, using your [SJWaterHUB](https://www.sjwaterhub.com) login. It does four things:
 
@@ -209,6 +210,10 @@ pytest
 ```
 
 `tests/portal.py` is a synthetic SJWaterHUB. It produces the portal's exact response and page shapes, including daylight-saving days, zero-padded future hours and the billing pages, so the whole flow is tested without an account.
+
+## 💖 Support
+
+If you found this project useful, consider [buying me a coffee](https://www.buymeacoffee.com/anthonysecco). ☕
 
 ## AI Disclosure
 
